@@ -27,9 +27,14 @@ pnpm dev
 Use the agent module directly from the CLI for isolated testing.
 
 ```bash
+# New sessions get a UUIDv7 ID (shown on start)
 pnpm agent:cli "hello"
+# [session: 019c0b0a-b111-765c-8bbd-f4149beac9c4]
 
-# Persist a session under ~/.super-multica/sessions/<id>/session.jsonl
+# Continue a session
+pnpm agent:cli --session 019c0b0a-b111-765c-8bbd-f4149beac9c4 "what did I say?"
+
+# Or use a custom session name
 pnpm agent:cli --session demo "remember my name is Alice"
 pnpm agent:cli --session demo "what's my name?"
 
@@ -38,7 +43,19 @@ pnpm agent:cli --provider openai --model gpt-4o-mini "hi"
 
 # Use an agent profile
 pnpm agent:cli --profile my-agent "hello"
+
+# Set thinking level
+pnpm agent:cli --thinking high "solve this complex problem"
 ```
+
+## Sessions
+
+Sessions persist conversation history to `~/.super-multica/sessions/<id>/`. Each session includes:
+
+- `session.jsonl` - Message history in JSONL format
+- `meta.json` - Session metadata (provider, model, thinking level)
+
+Sessions use UUIDv7 for IDs by default, providing time-ordered unique identifiers. The agent automatically handles context compaction when conversations grow too long.
 
 ## Agent Profiles
 
@@ -82,10 +99,10 @@ exec({ command: "ls -la", cwd: "/path/to/dir", timeoutMs: 30000 })
 
 ### process
 
-Manage long-running background processes (servers, watchers, daemons).
+Manage long-running background processes (servers, watchers, daemons). Output is buffered (up to 64KB) and terminated processes are automatically cleaned up after 1 hour.
 
 ```
-# Start a background process
+# Start a background process (returns immediately with process ID)
 process({ action: "start", command: "npm run dev" })
 
 # Check process status
