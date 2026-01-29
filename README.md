@@ -6,13 +6,27 @@ A multi-component architecture for distributed agent systems.
 
 ```
 src/
-├── agent/          # Agent module
-│   ├── profile/    # Agent profile management
-│   ├── session/    # Session persistence
-│   └── tools/      # Agent tools (exec, process)
-├── gateway/        # Gateway module
-├── client/         # Client module
-└── shared/         # Shared types and utilities
+├── agent/              # Core agent module
+│   ├── context-window/ # Token-aware context management
+│   ├── profile/        # Agent profile management
+│   ├── session/        # Session persistence with compaction
+│   ├── skills/         # Modular skill system
+│   └── tools/          # Agent tools
+│       └── web/        # Web fetch and search tools
+├── gateway/            # WebSocket gateway for distributed communication
+├── hub/                # Multi-agent coordination hub
+├── client/             # Client library
+├── console/            # NestJS console application
+└── shared/             # Shared types and gateway SDK
+    └── gateway-sdk/    # Gateway client SDK
+
+apps/
+└── web/                # Next.js web application
+
+packages/
+└── sdk/                # SDK package for external use
+
+skills/                 # Bundled skills (commit, code-review)
 ```
 
 ## Getting Started
@@ -55,7 +69,16 @@ Sessions persist conversation history to `~/.super-multica/sessions/<id>/`. Each
 - `session.jsonl` - Message history in JSONL format
 - `meta.json` - Session metadata (provider, model, thinking level)
 
-Sessions use UUIDv7 for IDs by default, providing time-ordered unique identifiers. The agent automatically handles context compaction when conversations grow too long.
+Sessions use UUIDv7 for IDs by default, providing time-ordered unique identifiers.
+
+### Context Window Management
+
+The agent automatically manages context windows to prevent token overflow:
+
+- **Token-aware compaction** - Tracks token usage and compacts when approaching limits
+- **Compaction modes**: `tokens` (default), `count` (legacy), `summary` (LLM-generated)
+- **Configurable safety margins** - Ensures space for responses
+- **Minimum message preservation** - Keeps recent context intact
 
 ## Agent Profiles
 
@@ -87,11 +110,49 @@ Each profile contains:
 - `memory.md` - Persistent knowledge
 - `bootstrap.md` - Initial conversation context
 
+## Skills
+
+Skills are modular capabilities that extend agent functionality. They are defined in `SKILL.md` files with YAML frontmatter.
+
+### Built-in Skills
+
+Located in `/skills/`:
+
+- **commit** - Git commit helper following conventional commits
+- **code-review** - Code review assistance
+
+### Skill Format
+
+```yaml
+---
+name: Skill Name
+description: What it does
+version: 1.0.0
+metadata:
+  emoji: 📝
+  requiresBinaries: [git]
+  platforms: [darwin, linux]
+  tags: [git, tools]
+---
+
+## Instructions
+(markdown instructions for the agent)
+```
+
+### Eligibility Filtering
+
+Skills can specify requirements:
+- `requiresBinaries` - Required CLI tools
+- `requiresEnvVars` - Required environment variables
+- `platforms` - Supported platforms (darwin, linux, win32)
+
+Skills are automatically filtered based on the current environment.
+
 ## Agent Tools
 
 ### exec
 
-Execute short-lived shell commands and return output.
+Execute short-lived shell commands and return output. Commands running longer than the timeout are automatically backgrounded.
 
 ```
 exec({ command: "ls -la", cwd: "/path/to/dir", timeoutMs: 30000 })
@@ -118,11 +179,85 @@ process({ action: "stop", id: "<process-id>" })
 process({ action: "cleanup" })
 ```
 
+### glob
+
+Pattern-based file discovery using fast-glob.
+
+```
+glob({ pattern: "**/*.ts", cwd: "/path/to/dir" })
+```
+
+### web_fetch
+
+Fetch and extract content from URLs with intelligent content extraction.
+
+```
+# Basic fetch (returns markdown)
+web_fetch({ url: "https://example.com" })
+
+# With options
+web_fetch({
+  url: "https://example.com",
+  outputFormat: "markdown",  # or "text"
+  extractor: "readability"   # or "turndown" for full page
+})
+```
+
+Features: SSRF protection, response caching, max 50KB output.
+
+### web_search
+
+Search the web using Brave or Perplexity AI.
+
+```
+# Basic search
+web_search({ query: "typescript best practices" })
+
+# With provider options
+web_search({
+  query: "latest AI news",
+  provider: "brave",     # or "perplexity"
+  count: 5,
+  freshness: "pw"        # past week (Brave: pd/pw/pm/py)
+})
+```
+
+## Distributed Architecture
+
+### Gateway
+
+The WebSocket gateway enables distributed multi-agent communication:
+
+- Real-time message passing between agents
+- Streaming support for long-running operations
+- RPC-style request/response patterns
+
+### Hub
+
+The Hub manages multiple agents and gateway connections:
+
+- Agent lifecycle management
+- Communication channel coordination
+- Device identification and tracking
+
 ## Scripts
 
-- `pnpm dev` - Run in development mode
+### Agent Commands
+
 - `pnpm agent:cli` - Run the agent CLI for module-level testing
+- `pnpm agent:interactive` - Interactive REPL mode
 - `pnpm agent:profile` - Manage agent profiles
+
+### Development
+
+- `pnpm dev` - Run full stack in development mode
+- `pnpm dev:gateway` - Run gateway only
+- `pnpm dev:console` - Run console only
+- `pnpm dev:web` - Run web app only
+
+### Build & Test
+
 - `pnpm build` - Build for production
+- `pnpm build:sdk` - Build SDK package
 - `pnpm start` - Run production build
 - `pnpm typecheck` - Type check without emitting
