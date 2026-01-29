@@ -5,6 +5,7 @@ import type { AgentTool } from "@mariozechner/pi-agent-core";
 import { createExecTool } from "./tools/exec.js";
 import { createProcessTool } from "./tools/process.js";
 import { createGlobTool } from "./tools/glob.js";
+import { createWebFetchTool, createWebSearchTool } from "./tools/web/index.js";
 
 export function resolveModel(options: AgentOptions) {
   if (options.provider && options.model) {
@@ -23,5 +24,14 @@ export function resolveTools(options: AgentOptions): AgentTool<any>[] {
   const execTool = createExecTool(cwd);
   const processTool = createProcessTool(cwd);
   const globTool = createGlobTool(cwd);
-  return [...baseTools, execTool as AgentTool<any>, processTool as AgentTool<any>, globTool as AgentTool<any>];
+  const webFetchTool = createWebFetchTool();
+  const webSearchTool = createWebSearchTool();
+  return [
+    ...baseTools,
+    execTool as AgentTool<any>,
+    processTool as AgentTool<any>,
+    globTool as AgentTool<any>,
+    webFetchTool as AgentTool<any>,
+    webSearchTool as AgentTool<any>,
+  ];
 }

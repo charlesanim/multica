@@ -23,6 +23,7 @@
   "packageManager": "pnpm@10.16.1",
   "devDependencies": {
     "@types/node": "^25.0.10",
+    "@types/turndown": "^5.0.6",
     "@types/uuid": "^11.0.0",
     "tsx": "^4.21.0",
     "turbo": "^2.3.4",
@@ -32,6 +33,7 @@
     "@mariozechner/pi-agent-core": "^0.50.3",
     "@mariozechner/pi-ai": "^0.50.3",
     "@mariozechner/pi-coding-agent": "^0.50.3",
+    "@mozilla/readability": "^0.6.0",
     "@nestjs/common": "^11.1.12",
     "@nestjs/core": "^11.1.12",
     "@nestjs/platform-express": "^11.1.12",
@@ -40,6 +42,7 @@
     "@nestjs/websockets": "^11.1.12",
     "@sinclair/typebox": "^0.34.41",
     "fast-glob": "^3.3.3",
+    "linkedom": "^0.18.12",
     "nestjs-pino": "^4.5.0",
     "pino": "^10.3.0",
     "pino-http": "^11.0.0",
@@ -48,6 +51,8 @@
     "rxjs": "^7.8.2",
     "socket.io": "^4.8.3",
     "socket.io-client": "^4.8.3",
+    "turndown": "^7.2.2",
+    "undici": "^7.19.2",
     "uuid": "^13.0.0"
   }
 }
