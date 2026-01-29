@@ -44,6 +44,7 @@ export class Agent {
   private readonly session: SessionManager;
   private readonly profile?: ProfileManager;
   private readonly contextWindowGuard: ContextWindowGuardResult;
+  private readonly debug: boolean;
 
   /** Current session ID */
   readonly sessionId: string;
@@ -52,6 +53,7 @@ export class Agent {
     const stdout = options.logger?.stdout ?? process.stdout;
     const stderr = options.logger?.stderr ?? process.stderr;
     this.output = createAgentOutput({ stdout, stderr });
+    this.debug = options.debug ?? false;
 
     this.agent = new PiAgentCore();
 
@@ -142,6 +144,26 @@ export class Agent {
 
     const restoredMessages = this.session.loadMessages();
     if (restoredMessages.length > 0) {
+      if (this.debug) {
+        console.error(`[debug] Restoring ${restoredMessages.length} messages from session`);
+        for (const msg of restoredMessages) {
+          const msgAny = msg as any;
+          const content = Array.isArray(msgAny.content)
+            ? msgAny.content.map((c: any) => c.type || "text").join(", ")
+            : typeof msgAny.content;
+          console.error(`[debug]   ${msg.role}: ${content}`);
+          if (Array.isArray(msgAny.content)) {
+            for (const block of msgAny.content) {
+              if (block.type === "tool_use") {
+                console.error(`[debug]     tool_use id: ${block.id}, name: ${block.name}`);
+              }
+              if (block.type === "tool_result") {
+                console.error(`[debug]     tool_result tool_use_id: ${block.tool_use_id}`);
+              }
+            }
+          }
+        }
+      }
       this.agent.replaceMessages(restoredMessages);
     }
 

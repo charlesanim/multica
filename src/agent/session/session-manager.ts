@@ -1,8 +1,18 @@
 import type { AgentMessage } from "@mariozechner/pi-agent-core";
-import type { Model } from "@mariozechner/pi-ai";
+import { getModel, type Model } from "@mariozechner/pi-ai";
 import type { SessionEntry, SessionMeta } from "./types.js";
 import { appendEntry, readEntries, writeEntries } from "./storage.js";
 import { compactMessages, compactMessagesAsync } from "./compaction.js";
+
+/** Get Kimi model for summarization (use a cheaper model than k2-thinking) */
+function getSummaryModel(): Model<any> {
+  return (getModel as (p: string, m: string) => Model<any>)("kimi", "moonshot-v1-128k");
+}
+
+/** Get Kimi API key */
+function getSummaryApiKey(): string | undefined {
+  return process.env.KIMI_API_KEY ?? process.env.MOONSHOT_API_KEY;
+}
 
 export type SessionManagerOptions = {
   sessionId: string;
@@ -171,9 +181,12 @@ export class SessionManager {
     let result;
 
     if (this.compactionMode === "summary") {
-      // Summary mode requires model and apiKey
-      if (!this.model || !this.apiKey) {
-        // Downgrade to tokens mode
+      // Use provided model/apiKey or fall back to Kimi
+      const model = this.model ?? getSummaryModel();
+      const apiKey = this.apiKey ?? getSummaryApiKey();
+
+      if (!apiKey) {
+        // No API key available, downgrade to tokens mode
         result = compactMessages(messages, {
           mode: "tokens",
           contextWindowTokens: this.contextWindowTokens,
@@ -185,8 +198,8 @@ export class SessionManager {
       } else {
         result = await compactMessagesAsync(messages, {
           mode: "summary",
-          model: this.model,
-          apiKey: this.apiKey,
+          model,
+          apiKey,
           contextWindowTokens: this.contextWindowTokens,
           systemPrompt: this.systemPrompt,
           reserveTokens: this.reserveTokens,

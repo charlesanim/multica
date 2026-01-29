@@ -60,3 +60,4 @@ Create three commits:
 - Never combine unrelated changes in one commit
 - Keep commit messages concise but descriptive
 - If all changes are related to one logical unit, a single commit is fine
+- `git commit --amend` can be used for immediate small fixes to the last commit, but not for unrelated changes

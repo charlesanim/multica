@@ -9,6 +9,7 @@ type CliOptions = {
   thinking?: string | undefined;
   cwd?: string | undefined;
   session?: string | undefined;
+  debug?: boolean | undefined;
   help?: boolean | undefined;
 };
 
@@ -24,6 +25,7 @@ function printUsage() {
   console.log("  --thinking LEVEL Thinking level");
   console.log("  --cwd DIR        Working directory for commands");
   console.log("  --session ID     Session ID for conversation persistence");
+  console.log("  --debug          Enable debug logging");
   console.log("  --help, -h       Show this help");
 }
 
@@ -65,6 +67,10 @@ function parseArgs(argv: string[]) {
     }
     if (arg === "--session") {
       opts.session = args.shift();
+      continue;
+    }
+    if (arg === "--debug") {
+      opts.debug = true;
       continue;
     }
     if (arg === "--") {
@@ -110,6 +116,7 @@ async function main() {
     thinkingLevel: opts.thinking as any,
     cwd: opts.cwd,
     sessionId: opts.session,
+    debug: opts.debug,
   });
 
   // If it's a newly created session, notify user of sessionId

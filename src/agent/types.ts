@@ -45,4 +45,7 @@ export type AgentOptions = {
   // === Summary Compaction Configuration ===
   /** Custom summary generation instructions */
   summaryInstructions?: string | undefined;
+
+  /** Enable debug logging */
+  debug?: boolean | undefined;
 };

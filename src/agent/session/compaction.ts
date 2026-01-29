@@ -23,6 +23,58 @@ export type CompactionResult = {
 };
 
 /**
+ * Find a safe compaction point that doesn't break tool_use/tool_result pairs.
+ * Returns the index to start keeping messages from.
+ */
+function findSafeCompactionPoint(messages: AgentMessage[], targetStart: number): number {
+  let start = targetStart;
+
+  // Move forward until we find a safe starting point
+  while (start < messages.length) {
+    const msg = messages[start];
+    if (!msg) {
+      start++;
+      continue;
+    }
+
+    // Safe to start from a user message
+    if (msg.role === "user") {
+      // But make sure it's not a toolResult without corresponding tool_use
+      const msgAny = msg as any;
+      if (Array.isArray(msgAny.content)) {
+        const hasToolResult = msgAny.content.some((b: any) => b.type === "tool_result");
+        if (!hasToolResult) {
+          break; // Safe: user message without tool_result
+        }
+      } else {
+        break; // Safe: simple user message
+      }
+    }
+
+    // toolResult messages need their corresponding tool_use, skip them
+    // assistant messages are ok to start from if they don't reference missing tool calls
+    if (msg.role === "assistant") {
+      // Check if previous messages have the required tool_use for any following tool_result
+      const nextMsg = messages[start + 1];
+      if (nextMsg && nextMsg.role === "user") {
+        const nextAny = nextMsg as any;
+        if (Array.isArray(nextAny.content)) {
+          const hasToolResult = nextAny.content.some((b: any) => b.type === "tool_result");
+          if (hasToolResult) {
+            // This assistant message has tool_use that's needed by next message
+            break;
+          }
+        }
+      }
+    }
+
+    start++;
+  }
+
+  return start;
+}
+
+/**
  * Simple compression based on message count (legacy logic, maintains backward compatibility)
  */
 export function compactMessagesByCount(
@@ -31,7 +83,22 @@ export function compactMessagesByCount(
   keepLast: number,
 ): CompactionResult | null {
   if (messages.length <= maxMessages) return null;
-  const kept = messages.slice(-keepLast);
+
+  const targetStart = messages.length - keepLast;
+  const safeStart = findSafeCompactionPoint(messages, targetStart);
+
+  // If we can't find a safe point, don't compact
+  if (safeStart >= messages.length) {
+    return null;
+  }
+
+  const kept = messages.slice(safeStart);
+
+  // Don't compact if we'd keep almost everything anyway
+  if (kept.length >= messages.length - 2) {
+    return null;
+  }
+
   return {
     kept,
     removedCount: messages.length - kept.length,

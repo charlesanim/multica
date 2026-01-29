@@ -1,7 +1,12 @@
-import { spawn, type ChildProcess } from "child_process";
+import { spawn } from "child_process";
 import { Type } from "@sinclair/typebox";
 import type { AgentTool } from "@mariozechner/pi-agent-core";
 import { v7 as uuidv7 } from "uuid";
+import {
+  PROCESS_REGISTRY,
+  registerProcess,
+  cleanupTerminatedProcesses,
+} from "./process-registry.js";
 
 const ProcessSchema = Type.Object({
   action: Type.String({ description: "Action: start | status | stop | output | cleanup." }),
@@ -9,36 +14,6 @@ const ProcessSchema = Type.Object({
   command: Type.Optional(Type.String({ description: "Command to run for start." })),
   cwd: Type.Optional(Type.String({ description: "Working directory." })),
 });
-
-const MAX_OUTPUT_BUFFER = 64 * 1024; // 64KB per process
-const TERMINATED_PROCESS_TTL = 60 * 60 * 1000; // 1 hour TTL for terminated processes
-
-type ProcessEntry = {
-  id: string;
-  command: string;
-  cwd?: string | undefined;
-  child: ChildProcess;
-  exitCode: number | null;
-  startedAt: number;
-  terminatedAt?: number | undefined;
-  outputBuffer: string[];
-  outputSize: number;
-};
-
-const PROCESS_REGISTRY = new Map<string, ProcessEntry>();
-
-/** Remove terminated processes older than TTL */
-function cleanupTerminatedProcesses(): number {
-  const now = Date.now();
-  let removed = 0;
-  for (const [id, entry] of PROCESS_REGISTRY) {
-    if (entry.terminatedAt && now - entry.terminatedAt > TERMINATED_PROCESS_TTL) {
-      PROCESS_REGISTRY.delete(id);
-      removed++;
-    }
-  }
-  return removed;
-}
 
 export type ProcessResult = {
   id?: string | undefined;
@@ -71,11 +46,13 @@ export function createProcessTool(defaultCwd?: string): AgentTool<typeof Process
           throw new Error(`Process already exists: ${id}`);
         }
 
+        const cwd = params.cwd || defaultCwd;
+
         // 使用 Promise 等待进程启动或失败
         const result = await new Promise<{ success: boolean; error?: string }>((resolve) => {
           const child = spawn(command, {
             shell: true,
-            cwd: params.cwd || defaultCwd,
+            cwd,
             stdio: ["ignore", "pipe", "pipe"],
             detached: true,
           });
@@ -94,44 +71,7 @@ export function createProcessTool(defaultCwd?: string): AgentTool<typeof Process
           child.on("spawn", () => {
             if (!resolved) {
               resolved = true;
-              const entry: ProcessEntry = {
-                id,
-                command,
-                cwd: params.cwd || defaultCwd,
-                child,
-                exitCode: null,
-                startedAt: Date.now(),
-                outputBuffer: [],
-                outputSize: 0,
-              };
-              PROCESS_REGISTRY.set(id, entry);
-
-              // Collect output to buffer with size limit
-              const collectOutput = (data: Buffer) => {
-                let text = data.toString("utf8");
-                // Truncate if single chunk exceeds max buffer
-                if (text.length > MAX_OUTPUT_BUFFER) {
-                  text = text.slice(-MAX_OUTPUT_BUFFER);
-                  entry.outputBuffer = [];
-                  entry.outputSize = 0;
-                } else if (entry.outputSize + text.length > MAX_OUTPUT_BUFFER) {
-                  // Remove old entries to make room
-                  while (entry.outputBuffer.length > 0 && entry.outputSize + text.length > MAX_OUTPUT_BUFFER) {
-                    const removed = entry.outputBuffer.shift();
-                    if (removed) entry.outputSize -= removed.length;
-                  }
-                }
-                entry.outputBuffer.push(text);
-                entry.outputSize += text.length;
-              };
-
-              child.stdout?.on("data", collectOutput);
-              child.stderr?.on("data", collectOutput);
-
-              child.on("close", (code) => {
-                entry.exitCode = code;
-                entry.terminatedAt = Date.now();
-              });
+              registerProcess(child, command, cwd, "process", id);
 
               if (signal) {
                 signal.addEventListener("abort", () => {
