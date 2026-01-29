@@ -14,16 +14,16 @@ import {
 export type CompactionResult = {
   kept: AgentMessage[];
   removedCount: number;
-  /** Token 感知模式下的额外信息 */
+  /** Additional information in token-aware mode */
   tokensRemoved?: number | undefined;
   tokensKept?: number | undefined;
-  /** 摘要模式下生成的摘要 */
+  /** Summary generated in summary mode */
   summary?: string | undefined;
   reason: "count" | "tokens" | "summary";
 };
 
 /**
- * 基于消息数量的简单压缩（旧逻辑，保持向后兼容）
+ * Simple compression based on message count (legacy logic, maintains backward compatibility)
  */
 export function compactMessagesByCount(
   messages: AgentMessage[],
@@ -40,7 +40,7 @@ export function compactMessagesByCount(
 }
 
 /**
- * 基于 token 的智能压缩
+ * Token-based intelligent compression
  */
 export function compactMessagesByTokens(
   messages: AgentMessage[],
@@ -62,13 +62,13 @@ export function compactMessagesByTokens(
   };
 }
 
-/** 同步压缩选项（count/tokens 模式） */
+/** Synchronous compaction options (count/tokens modes) */
 export type SyncCompactionOptions = {
   mode: "count" | "tokens";
-  // count 模式参数
+  // count mode parameters
   maxMessages?: number | undefined;
   keepLast?: number | undefined;
-  // tokens 模式参数
+  // tokens mode parameters
   contextWindowTokens?: number | undefined;
   systemPrompt?: string | undefined;
   reserveTokens?: number | undefined;
@@ -76,19 +76,19 @@ export type SyncCompactionOptions = {
   minKeepMessages?: number | undefined;
 };
 
-/** 摘要压缩选项（summary 模式） */
+/** Summary compaction options (summary mode) */
 export type SummaryCompactionOptions = {
   mode: "summary";
-  // 必需参数
+  // Required parameters
   model: Model<any>;
   apiKey: string;
-  // tokens 模式参数（复用）
+  // tokens mode parameters (reused)
   contextWindowTokens?: number | undefined;
   systemPrompt?: string | undefined;
   reserveTokens?: number | undefined;
   targetRatio?: number | undefined;
   minKeepMessages?: number | undefined;
-  // summary 特有参数
+  // summary-specific parameters
   customInstructions?: string | undefined;
   previousSummary?: string | undefined;
   signal?: AbortSignal | undefined;
@@ -98,9 +98,9 @@ export type SummaryCompactionOptions = {
 export type CompactionOptions = SyncCompactionOptions | SummaryCompactionOptions;
 
 /**
- * 统一的压缩入口（同步版本，用于 count/tokens 模式）
+ * Unified compaction entry point (synchronous version, for count/tokens modes)
  *
- * 根据模式选择压缩策略
+ * Selects compaction strategy based on mode
  */
 export function compactMessages(
   messages: AgentMessage[],
@@ -114,7 +114,7 @@ export function compactMessages(
     );
   }
 
-  // Token 模式
+  // Token mode
   const contextWindowTokens = options.contextWindowTokens ?? 200_000;
   const estimation = estimateTokenUsage({
     messages,
@@ -135,9 +135,9 @@ export function compactMessages(
 }
 
 /**
- * 摘要式压缩（异步版本）
+ * Summary-based compaction (asynchronous version)
  *
- * 使用 LLM 生成历史消息的摘要
+ * Uses LLM to generate summary of historical messages
  */
 export async function compactMessagesAsync(
   messages: AgentMessage[],
@@ -151,12 +151,12 @@ export async function compactMessagesAsync(
     reserveTokens: options.reserveTokens,
   });
 
-  // 检查是否需要压缩
+  // Check if compaction is needed
   if (!shouldCompactTokens(estimation)) {
     return null;
   }
 
-  // 使用分块摘要处理超大历史
+  // Use chunked summary to handle very large history
   const result = await compactMessagesWithChunkedSummary({
     messages,
     model: options.model,

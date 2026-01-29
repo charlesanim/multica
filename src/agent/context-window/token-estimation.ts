@@ -1,45 +1,45 @@
 /**
- * Token 估算工具
+ * Token estimation tool
  *
- * 提供消息和系统提示词的 token 计数功能
+ * Provides token counting functionality for messages and system prompts
  */
 
 import type { AgentMessage } from "@mariozechner/pi-agent-core";
 import { estimateTokens } from "@mariozechner/pi-coding-agent";
 import type { TokenEstimation, TokenAwareCompactionResult } from "./types.js";
 
-/** 安全边界系数，用于补偿估算不准确 */
+/** Safety margin coefficient to compensate for estimation inaccuracy */
 export const ESTIMATION_SAFETY_MARGIN = 1.2; // 20% buffer
 
-/** 触发 compaction 的利用率阈值 */
+/** Utilization threshold for triggering compaction */
 export const COMPACTION_TRIGGER_RATIO = 0.8; // 80%
 
-/** Compaction 目标利用率 */
+/** Compaction target utilization ratio */
 export const COMPACTION_TARGET_RATIO = 0.5; // 50%
 
-/** 最小保留消息数 */
+/** Minimum messages to keep */
 export const MIN_KEEP_MESSAGES = 10;
 
 /**
- * 估算消息数组的总 token 数
+ * Estimate total tokens for message array
  */
 export function estimateMessagesTokens(messages: AgentMessage[]): number {
   return messages.reduce((sum, message) => sum + estimateTokens(message), 0);
 }
 
 /**
- * 估算系统提示词的 token 数
+ * Estimate tokens for system prompt
  */
 export function estimateSystemPromptTokens(systemPrompt: string | undefined): number {
   if (!systemPrompt) return 0;
-  // 简单估算：约 4 字符 = 1 token（适用于英文/代码混合文本）
-  // 中文约 2 字符 = 1 token
-  // 取平均值 3
+  // Simple estimation: ~4 chars = 1 token (for English/code mixed text)
+  // Chinese ~2 chars = 1 token
+  // Average value of 3
   return Math.ceil(systemPrompt.length / 3);
 }
 
 /**
- * 计算完整的 token 使用情况
+ * Calculate complete token usage
  */
 export function estimateTokenUsage(params: {
   messages: AgentMessage[];
@@ -49,15 +49,15 @@ export function estimateTokenUsage(params: {
 }): TokenEstimation {
   const messageTokens = estimateMessagesTokens(params.messages);
   const systemPromptTokens = estimateSystemPromptTokens(params.systemPrompt);
-  const reserve = params.reserveTokens ?? 1024; // 预留给响应生成
+  const reserve = params.reserveTokens ?? 1024; // Reserved for response generation
 
-  // 可用 token = 总窗口 - 系统提示 - 预留
+  // Available tokens = total window - system prompt - reserve
   const availableTokens = Math.max(
     0,
     params.contextWindowTokens - systemPromptTokens - reserve,
   );
 
-  // 计算利用率（带安全边界）
+  // Calculate utilization ratio (with safety margin)
   const safeMessageTokens = messageTokens * ESTIMATION_SAFETY_MARGIN;
   const utilizationRatio = availableTokens > 0 ? safeMessageTokens / availableTokens : 1;
 
@@ -70,16 +70,16 @@ export function estimateTokenUsage(params: {
 }
 
 /**
- * 判断是否需要 compaction
+ * Determine if compaction is needed
  */
 export function shouldCompact(estimation: TokenEstimation): boolean {
   return estimation.utilizationRatio >= COMPACTION_TRIGGER_RATIO;
 }
 
 /**
- * Token 感知的消息压缩
+ * Token-aware message compression
  *
- * 策略：从最旧的消息开始移除，直到达到目标利用率
+ * Strategy: Remove from oldest messages until reaching target utilization ratio
  */
 export function compactMessagesTokenAware(
   messages: AgentMessage[],
@@ -93,39 +93,39 @@ export function compactMessagesTokenAware(
   const minKeep = options?.minKeepMessages ?? MIN_KEEP_MESSAGES;
 
   if (messages.length <= minKeep) {
-    return null; // 消息太少，不压缩
+    return null; // Too few messages, no compression
   }
 
   const currentTokens = estimateMessagesTokens(messages);
   const targetTokens = Math.floor(availableTokens * targetRatio);
 
-  // 如果当前已经在目标内，不需要压缩
+  // If already within target, no compression needed
   if (currentTokens <= targetTokens) {
     return null;
   }
 
-  // 从后往前保留消息，直到达到目标 token 数
+  // Keep messages from back to front until reaching target token count
   const kept: AgentMessage[] = [];
   let keptTokens = 0;
 
-  // 反向遍历，保留最新的消息
+  // Reverse iteration, keep newest messages
   for (let i = messages.length - 1; i >= 0; i--) {
     const msg = messages[i]!;
     const msgTokens = estimateTokens(msg);
 
-    // 检查是否可以添加这条消息
+    // Check if this message can be added
     if (keptTokens + msgTokens <= targetTokens || kept.length < minKeep) {
       kept.unshift(msg);
       keptTokens += msgTokens;
     }
 
-    // 如果已经达到最小保留数且超过目标，停止
+    // If minimum keep count reached and exceeds target, stop
     if (kept.length >= minKeep && keptTokens >= targetTokens) {
       break;
     }
   }
 
-  // 如果保留的消息数量不变，说明没有压缩
+  // If kept message count unchanged, no compression occurred
   if (kept.length >= messages.length) {
     return null;
   }
@@ -142,9 +142,9 @@ export function compactMessagesTokenAware(
 }
 
 /**
- * 检查单条消息是否过大
+ * Check if single message is oversized
  *
- * 如果单条消息超过 context window 的一定比例，可能需要特殊处理
+ * If a single message exceeds a certain ratio of context window, special handling may be needed
  */
 export function isMessageOversized(
   message: AgentMessage,

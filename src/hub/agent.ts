@@ -4,8 +4,8 @@ import { Channel } from "./channel.js";
 import type { Message } from "./types.js";
 
 /**
- * Agent — 使用 pi-agent-core 进行真实推理。
- * write() 触发一次模型运行，read() 输出流式结果。
+ * Agent — uses pi-agent-core for real inference.
+ * write() triggers a model run, read() outputs streaming results.
  */
 export class Agent {
   readonly id: string;
@@ -29,7 +29,7 @@ export class Agent {
     return this._closed;
   }
 
-  /** 写入消息到 agent（非阻塞，串行排队） */
+  /** Write message to agent (non-blocking, serialized queue) */
   write(content: string): void {
     if (this._closed) {
       throw new Error("Agent is closed");
@@ -51,12 +51,12 @@ export class Agent {
       });
   }
 
-  /** 持续读取消息流 */
+  /** Continuously read message stream */
   read(): AsyncIterable<Message> {
     return this.channel;
   }
 
-  /** 关闭 agent，停止所有读取 */
+  /** Close agent, stop all reads */
   close(): void {
     if (this._closed) return;
     this._closed = true;

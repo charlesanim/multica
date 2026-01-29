@@ -8,32 +8,32 @@ export type SessionManagerOptions = {
   sessionId: string;
   baseDir?: string | undefined;
 
-  // Compaction 模式配置
-  /** Compaction 模式: "count" 使用消息计数, "tokens" 使用 token 感知, "summary" 使用 LLM 摘要 */
+  // Compaction mode configuration
+  /** Compaction mode: "count" uses message count, "tokens" uses token awareness, "summary" uses LLM summary */
   compactionMode?: "count" | "tokens" | "summary" | undefined;
 
-  // Count 模式参数
+  // Count mode parameters
   maxMessages?: number | undefined;
   keepLast?: number | undefined;
 
-  // Token 模式参数
-  /** Context window token 数 */
+  // Token mode parameters
+  /** Context window token count */
   contextWindowTokens?: number | undefined;
-  /** 系统提示词（用于计算可用 token） */
+  /** System prompt (used to calculate available tokens) */
   systemPrompt?: string | undefined;
-  /** 预留给响应的 token 数 */
+  /** Tokens reserved for responses */
   reserveTokens?: number | undefined;
-  /** Compaction 目标利用率 (0-1) */
+  /** Compaction target utilization ratio (0-1) */
   targetRatio?: number | undefined;
-  /** 最小保留消息数 */
+  /** Minimum messages to keep */
   minKeepMessages?: number | undefined;
 
-  // Summary 模式参数
-  /** LLM Model（用于生成摘要） */
+  // Summary mode parameters
+  /** LLM Model (for generating summary) */
   model?: Model<any> | undefined;
   /** API Key */
   apiKey?: string | undefined;
-  /** 自定义摘要指令 */
+  /** Custom summary instructions */
   customInstructions?: string | undefined;
 };
 
@@ -41,16 +41,16 @@ export class SessionManager {
   private readonly sessionId: string;
   private readonly baseDir: string | undefined;
   private readonly compactionMode: "count" | "tokens" | "summary";
-  // Count 模式
+  // Count mode
   private readonly maxMessages: number;
   private readonly keepLast: number;
-  // Token 模式
+  // Token mode
   private readonly contextWindowTokens: number;
   private systemPrompt: string | undefined;
   private readonly reserveTokens: number;
   private readonly targetRatio: number;
   private readonly minKeepMessages: number;
-  // Summary 模式
+  // Summary mode
   private model: Model<any> | undefined;
   private apiKey: string | undefined;
   private readonly customInstructions: string | undefined;
@@ -63,21 +63,21 @@ export class SessionManager {
     this.sessionId = options.sessionId;
     this.baseDir = options.baseDir;
 
-    // Compaction 模式
+    // Compaction mode
     this.compactionMode = options.compactionMode ?? "count";
 
-    // Count 模式参数
+    // Count mode parameters
     this.maxMessages = options.maxMessages ?? 80;
     this.keepLast = options.keepLast ?? 60;
 
-    // Token 模式参数
+    // Token mode parameters
     this.contextWindowTokens = options.contextWindowTokens ?? 200_000;
     this.systemPrompt = options.systemPrompt;
     this.reserveTokens = options.reserveTokens ?? 1024;
     this.targetRatio = options.targetRatio ?? 0.5;
     this.minKeepMessages = options.minKeepMessages ?? 10;
 
-    // Summary 模式参数
+    // Summary mode parameters
     this.model = options.model;
     this.apiKey = options.apiKey;
     this.customInstructions = options.customInstructions;
@@ -86,35 +86,35 @@ export class SessionManager {
   }
 
   /**
-   * 更新系统提示词（用于 token 模式计算）
+   * Update system prompt (for token mode calculation)
    */
   setSystemPrompt(systemPrompt: string | undefined) {
     this.systemPrompt = systemPrompt;
   }
 
   /**
-   * 获取当前 context window token 数
+   * Get current context window token count
    */
   getContextWindowTokens(): number {
     return this.contextWindowTokens;
   }
 
   /**
-   * 设置 LLM Model（用于 summary 模式）
+   * Set LLM Model (for summary mode)
    */
   setModel(model: Model<any> | undefined) {
     this.model = model;
   }
 
   /**
-   * 设置 API Key（用于 summary 模式）
+   * Set API Key (for summary mode)
    */
   setApiKey(apiKey: string | undefined) {
     this.apiKey = apiKey;
   }
 
   /**
-   * 获取当前 compaction 模式
+   * Get current compaction mode
    */
   getCompactionMode(): "count" | "tokens" | "summary" {
     return this.compactionMode;
@@ -171,9 +171,9 @@ export class SessionManager {
     let result;
 
     if (this.compactionMode === "summary") {
-      // Summary 模式需要 model 和 apiKey
+      // Summary mode requires model and apiKey
       if (!this.model || !this.apiKey) {
-        // 降级到 tokens 模式
+        // Downgrade to tokens mode
         result = compactMessages(messages, {
           mode: "tokens",
           contextWindowTokens: this.contextWindowTokens,
@@ -196,7 +196,7 @@ export class SessionManager {
           previousSummary: this.previousSummary,
         });
 
-        // 保存摘要用于下次增量更新
+        // Save summary for next incremental update
         if (result?.summary) {
           this.previousSummary = result.summary;
         }
@@ -204,10 +204,10 @@ export class SessionManager {
     } else {
       result = compactMessages(messages, {
         mode: this.compactionMode,
-        // Count 模式参数
+        // Count mode parameters
         maxMessages: this.maxMessages,
         keepLast: this.keepLast,
-        // Token 模式参数
+        // Token mode parameters
         contextWindowTokens: this.contextWindowTokens,
         systemPrompt: this.systemPrompt,
         reserveTokens: this.reserveTokens,
@@ -230,7 +230,7 @@ export class SessionManager {
       removed: result.removedCount,
       kept: result.kept.length,
       timestamp: Date.now(),
-      // Token/Summary 模式下的额外信息
+      // Additional information in Token/Summary mode
       tokensRemoved: result.tokensRemoved,
       tokensKept: result.tokensKept,
       summary: result.summary,

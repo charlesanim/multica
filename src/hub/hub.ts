@@ -12,7 +12,7 @@ export class Hub {
   readonly path: string;
   readonly deviceId: string;
 
-  /** 当前 Gateway 连接状态 */
+  /** Current Gateway connection state */
   get connectionState(): ConnectionState {
     return this.client.state;
   }
@@ -68,7 +68,7 @@ export class Hub {
     this.client.connect();
   }
 
-  /** 创建新 Agent，或用已有 ID 重建 */
+  /** Create new Agent, or rebuild with existing ID */
   createAgent(id?: string): Agent {
     if (id) {
       const existing = this.agents.get(id);
@@ -80,14 +80,14 @@ export class Hub {
     const agent = new Agent(id);
     this.agents.set(agent.id, agent);
 
-    // 内部消费 agent 产出的消息
+    // Internally consume messages produced by agent
     void this.consumeAgent(agent);
 
     console.log(`Agent created: ${agent.id}`);
     return agent;
   }
 
-  /** 内部读取 agent 的输出并通过 Gateway 发送 */
+  /** Internally read agent output and send via Gateway */
   private async consumeAgent(agent: Agent): Promise<void> {
     for await (const msg of agent.read()) {
       console.log(`[${agent.id}] ${msg.content}`);

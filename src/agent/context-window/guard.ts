@@ -1,22 +1,22 @@
 /**
- * Context Window Guard - 上下文窗口验证
+ * Context Window Guard - Context Window Validation
  *
- * 在 agent 运行前验证 context window 是否足够，防止 token 溢出
+ * Validates context window sufficiency before agent runs to prevent token overflow
  */
 
 import type { ContextWindowInfo, ContextWindowGuardResult, ContextWindowSource } from "./types.js";
 
-/** 硬性最小 token 数，低于此值将阻止运行 */
+/** Hard minimum token count, below which execution will be blocked */
 export const CONTEXT_WINDOW_HARD_MIN_TOKENS = 16_000;
 
-/** 警告阈值，低于此值会发出警告 */
+/** Warning threshold, below which a warning will be issued */
 export const CONTEXT_WINDOW_WARN_BELOW_TOKENS = 32_000;
 
-/** 默认 context window（当无法获取时） */
+/** Default context window (when unable to obtain) */
 export const DEFAULT_CONTEXT_TOKENS = 200_000;
 
 /**
- * 标准化为正整数
+ * Normalize to positive integer
  */
 function normalizePositiveInt(value: unknown): number | null {
   if (typeof value !== "number" || !Number.isFinite(value)) return null;
@@ -25,31 +25,31 @@ function normalizePositiveInt(value: unknown): number | null {
 }
 
 /**
- * 解析 context window 信息
+ * Resolve context window information
  *
- * 优先级：model > config > default
+ * Priority: model > config > default
  */
 export function resolveContextWindowInfo(params: {
-  /** Model 的 contextWindow 属性 */
+  /** Model's contextWindow property */
   modelContextWindow?: number | undefined;
-  /** 配置中指定的 context tokens */
+  /** Context tokens specified in config */
   configContextTokens?: number | undefined;
-  /** 默认值 */
+  /** Default value */
   defaultTokens?: number | undefined;
 }): ContextWindowInfo {
-  // 1. 尝试从 model 获取
+  // 1. Try getting from model
   const fromModel = normalizePositiveInt(params.modelContextWindow);
   if (fromModel) {
     return { tokens: fromModel, source: "model" };
   }
 
-  // 2. 尝试从配置获取
+  // 2. Try getting from config
   const fromConfig = normalizePositiveInt(params.configContextTokens);
   if (fromConfig) {
     return { tokens: fromConfig, source: "config" };
   }
 
-  // 3. 使用默认值
+  // 3. Use default value
   return {
     tokens: Math.floor(params.defaultTokens ?? DEFAULT_CONTEXT_TOKENS),
     source: "default",
@@ -57,9 +57,9 @@ export function resolveContextWindowInfo(params: {
 }
 
 /**
- * 评估 context window guard
+ * Evaluate context window guard
  *
- * 返回是否需要警告或阻止运行
+ * Returns whether warning or blocking is needed
  */
 export function evaluateContextWindowGuard(params: {
   info: ContextWindowInfo;
@@ -85,9 +85,9 @@ export function evaluateContextWindowGuard(params: {
 }
 
 /**
- * 完整的 context window guard 流程
+ * Complete context window guard workflow
  *
- * 解析 + 评估一步完成
+ * Resolution + evaluation in one step
  */
 export function checkContextWindow(params: {
   modelContextWindow?: number | undefined;

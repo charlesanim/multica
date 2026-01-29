@@ -12,7 +12,7 @@ import {
 } from "./context-window/index.js";
 
 /**
- * 根据 provider 获取 API Key
+ * Get API Key based on provider
  */
 function resolveApiKey(provider: string): string | undefined {
   const providerEnvMap: Record<string, string> = {
@@ -33,7 +33,7 @@ function resolveApiKey(provider: string): string | undefined {
     return process.env[envVar];
   }
 
-  // 尝试通用格式: PROVIDER_API_KEY
+  // Try generic format: PROVIDER_API_KEY
   const normalizedProvider = provider.toUpperCase().replace(/-/g, "_");
   return process.env[`${normalizedProvider}_API_KEY`];
 }
@@ -45,7 +45,7 @@ export class Agent {
   private readonly profile?: ProfileManager;
   private readonly contextWindowGuard: ContextWindowGuardResult;
 
-  /** 当前会话 ID */
+  /** Current session ID */
   readonly sessionId: string;
 
   constructor(options: AgentOptions = {}) {

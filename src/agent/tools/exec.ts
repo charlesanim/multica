@@ -71,12 +71,12 @@ export function createExecTool(defaultCwd?: string): AgentTool<typeof ExecSchema
         child.on("error", (err) => {
           if (timeout) clearTimeout(timeout);
           spawnError = err;
-          // 不 reject，让 close 事件处理
+          // Don't reject, let close event handle
         });
         child.on("close", (code) => {
           if (timeout) clearTimeout(timeout);
 
-          // 如果有 spawn 错误，返回错误信息
+          // If there's a spawn error, return error message
           if (spawnError) {
             resolve({
               content: [{ type: "text", text: `Error: ${spawnError.message}` }],

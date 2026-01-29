@@ -1,6 +1,6 @@
 /**
- * Go channel 风格的异步可迭代队列。
- * 支持多 writer、单 reader，close 后结束迭代。
+ * Go channel style async iterable queue.
+ * Supports multiple writers, single reader, iteration ends after close.
  */
 export class Channel<T> implements AsyncIterable<T> {
   private buffer: T[] = [];
@@ -18,7 +18,7 @@ export class Channel<T> implements AsyncIterable<T> {
     return this.buffer.length;
   }
 
-  /** 发送值到 channel。channel 已关闭时返回 false。 */
+  /** Send value to channel. Returns false when channel is closed. */
   send(value: T): boolean {
     if (this.closed) return false;
 
@@ -32,7 +32,7 @@ export class Channel<T> implements AsyncIterable<T> {
     return true;
   }
 
-  /** 关闭 channel，唤醒所有等待中的 reader。 */
+  /** Close channel, wake up all waiting readers. */
   close(): void {
     if (this.closed) return;
     this.closed = true;

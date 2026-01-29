@@ -112,7 +112,7 @@ async function main() {
     sessionId: opts.session,
   });
 
-  // 如果是新创建的 session，提示用户 sessionId
+  // If it's a newly created session, notify user of sessionId
   if (!opts.session) {
     console.error(`[session: ${agent.sessionId}]`);
   }

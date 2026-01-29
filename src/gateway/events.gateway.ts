@@ -29,9 +29,9 @@ import {
   cors: {
     origin: "*",
   },
-  // 心跳检测配置
-  pingInterval: 25000, // 每 25 秒发送 PING
-  pingTimeout: 20000, // 20 秒内需响应，否则断开
+  // Heartbeat detection configuration
+  pingInterval: 25000, // Send PING every 25 seconds
+  pingTimeout: 20000, // Must respond within 20 seconds, otherwise disconnect
 })
 export class EventsGateway
   implements OnGatewayInit, OnGatewayConnection, OnGatewayDisconnect
@@ -44,9 +44,9 @@ export class EventsGateway
   @WebSocketServer()
   server!: Server;
 
-  // deviceId -> socketId 映射
+  // deviceId -> socketId mapping
   private deviceToSocket = new Map<string, string>();
-  // socketId -> deviceInfo 映射
+  // socketId -> deviceInfo mapping
   private socketToDevice = new Map<string, DeviceInfo>();
 
   afterInit(_server: Server): void {
@@ -72,7 +72,7 @@ export class EventsGateway
       return;
     }
 
-    // 检查 deviceId 是否已被其他 socket 使用
+    // Check if deviceId is already in use by another socket
     const existingSocketId = this.deviceToSocket.get(deviceId);
     if (existingSocketId && existingSocketId !== client.id) {
       this.logger.warn(
@@ -88,7 +88,7 @@ export class EventsGateway
       return;
     }
 
-    // 注册设备
+    // Register device
     const deviceInfo: DeviceInfo = { deviceId, deviceType };
     this.deviceToSocket.set(deviceId, client.id);
     this.socketToDevice.set(client.id, deviceInfo);
@@ -127,7 +127,7 @@ export class EventsGateway
 
     const senderDevice = this.socketToDevice.get(client.id);
 
-    // 检查发送者是否已注册
+    // Check if sender is registered
     if (!senderDevice) {
       const error: SendErrorResponse = {
         messageId: message.id,
@@ -138,7 +138,7 @@ export class EventsGateway
       return;
     }
 
-    // 检查消息 from 是否匹配
+    // Check if message 'from' matches
     if (message.from !== senderDevice.deviceId) {
       const error: SendErrorResponse = {
         messageId: message.id,
@@ -149,7 +149,7 @@ export class EventsGateway
       return;
     }
 
-    // 查找目标设备
+    // Find target device
     const targetSocketId = this.deviceToSocket.get(message.to);
     if (!targetSocketId) {
       const error: SendErrorResponse = {
@@ -161,7 +161,7 @@ export class EventsGateway
       return;
     }
 
-    // 转发消息
+    // Forward message
     this.logger.debug(
       { messageId: message.id, from: message.from, to: message.to, action: message.action },
       "Routing message"
@@ -178,17 +178,17 @@ export class EventsGateway
     return { event: GatewayEvents.PONG, data: "Hello from Gateway!" };
   }
 
-  /** 获取所有在线设备（供 HTTP API 使用） */
+  /** Get all online devices (for HTTP API use) */
   getOnlineDevices(): DeviceInfo[] {
     return Array.from(this.socketToDevice.values());
   }
 
-  /** 获取指定类型的在线设备 */
+  /** Get online devices of specified type */
   getOnlineDevicesByType(type: "client" | "agent"): DeviceInfo[] {
     return this.getOnlineDevices().filter((d) => d.deviceType === type);
   }
 
-  /** 向指定设备发送消息（供 HTTP API 使用） */
+  /** Send message to specified device (for HTTP API use) */
   sendToDevice(deviceId: string, event: string, data: unknown): boolean {
     const socketId = this.deviceToSocket.get(deviceId);
     if (!socketId) return false;

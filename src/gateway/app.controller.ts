@@ -22,7 +22,7 @@ export class AppController {
 
   @Post("broadcast")
   broadcast(@Body() body: { text: string }): { success: boolean } {
-    // 通过 HTTP 接口广播消息给所有 WebSocket 客户端
+    // Broadcast messages to all WebSocket clients via HTTP interface
     this.eventsGateway.server.emit("message", {
       from: "server",
       text: body.text,

@@ -11,38 +11,38 @@ export type AgentLogger = {
 };
 
 export type AgentOptions = {
-  /** Agent Profile ID - 加载预定义的身份、人格、记忆等配置 */
+  /** Agent Profile ID - loads predefined identity, personality, memory and other configurations */
   profileId?: string | undefined;
-  /** Profile 基础目录，默认 ~/.super-multica/agent-profiles */
+  /** Profile base directory, defaults to ~/.super-multica/agent-profiles */
   profileBaseDir?: string | undefined;
   provider?: string | undefined;
   model?: string | undefined;
-  /** System prompt，如果设置了 profileId 会自动从 profile 构建 */
+  /** System prompt, if profileId is set will auto-construct from profile */
   systemPrompt?: string | undefined;
   thinkingLevel?: ThinkingLevel | undefined;
-  /** 命令执行目录 */
+  /** Command execution directory */
   cwd?: string | undefined;
   sessionId?: string | undefined;
   logger?: AgentLogger | undefined;
 
-  // === Context Window Guard 配置 ===
-  /** 手动指定 context window token 数（覆盖 model 的值） */
+  // === Context Window Guard Configuration ===
+  /** Manually specify context window token count (overrides model value) */
   contextWindowTokens?: number | undefined;
-  /** 预留给响应生成的 token 数，默认 1024 */
+  /** Tokens reserved for response generation, defaults to 1024 */
   reserveTokens?: number | undefined;
   /**
-   * Compaction 模式:
-   * - "count": 使用旧的消息计数
-   * - "tokens": 使用 token 感知（默认）
-   * - "summary": 使用 LLM 生成摘要
+   * Compaction mode:
+   * - "count": uses legacy message count
+   * - "tokens": uses token awareness (default)
+   * - "summary": uses LLM to generate summary
    */
   compactionMode?: "count" | "tokens" | "summary" | undefined;
-  /** Compaction 目标利用率 (0-1)，默认 0.5 */
+  /** Compaction target utilization ratio (0-1), defaults to 0.5 */
   compactionTargetRatio?: number | undefined;
-  /** 最小保留消息数，默认 10 */
+  /** Minimum messages to keep, defaults to 10 */
   minKeepMessages?: number | undefined;
 
-  // === Summary Compaction 配置 ===
-  /** 自定义摘要生成指令 */
+  // === Summary Compaction Configuration ===
+  /** Custom summary generation instructions */
   summaryInstructions?: string | undefined;
 };

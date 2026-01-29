@@ -1,48 +1,48 @@
 /**
- * Context Window Guard - 类型定义
+ * Context Window Guard - Type Definitions
  *
- * 用于管理和验证 LLM 上下文窗口限制
+ * Used to manage and validate LLM context window limits
  */
 
-/** Context window 信息来源 */
+/** Context window information source */
 export type ContextWindowSource = "model" | "config" | "default";
 
-/** Context window 信息 */
+/** Context window information */
 export type ContextWindowInfo = {
-  /** Token 数量 */
+  /** Token count */
   tokens: number;
-  /** 来源 */
+  /** Source */
   source: ContextWindowSource;
 };
 
-/** Context window guard 验证结果 */
+/** Context window guard validation result */
 export type ContextWindowGuardResult = ContextWindowInfo & {
-  /** 是否需要警告（窗口较小） */
+  /** Whether warning is needed (window is small) */
   shouldWarn: boolean;
-  /** 是否应该阻止运行（窗口太小） */
+  /** Whether execution should be blocked (window is too small) */
   shouldBlock: boolean;
 };
 
-/** Token 估算结果 */
+/** Token estimation result */
 export type TokenEstimation = {
-  /** 消息总 token 数 */
+  /** Total message tokens */
   messageTokens: number;
-  /** 系统提示词 token 数 */
+  /** System prompt tokens */
   systemPromptTokens: number;
-  /** 可用 token 数 */
+  /** Available tokens */
   availableTokens: number;
-  /** 使用率 (0-1) */
+  /** Utilization ratio (0-1) */
   utilizationRatio: number;
 };
 
-/** Compaction 结果（带 token 信息） */
+/** Compaction result (with token information) */
 export type TokenAwareCompactionResult = {
-  /** 保留的消息 */
+  /** Kept messages */
   kept: import("@mariozechner/pi-agent-core").AgentMessage[];
-  /** 移除的消息数量 */
+  /** Number of removed messages */
   removedCount: number;
-  /** 移除的 token 数 */
+  /** Tokens removed */
   tokensRemoved: number;
-  /** 保留的 token 数 */
+  /** Tokens kept */
   tokensKept: number;
 };

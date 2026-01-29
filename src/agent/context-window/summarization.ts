@@ -1,7 +1,7 @@
 /**
- * 摘要式 Compaction
+ * Summary-based Compaction
  *
- * 使用 LLM 生成历史消息的摘要，而不是简单截断
+ * Uses LLM to generate summaries of historical messages instead of simple truncation
  */
 
 import type { AgentMessage } from "@mariozechner/pi-agent-core";
@@ -9,41 +9,41 @@ import { generateSummary, estimateTokens } from "@mariozechner/pi-coding-agent";
 import type { Model } from "@mariozechner/pi-ai";
 import { estimateMessagesTokens } from "./token-estimation.js";
 
-/** 摘要 Compaction 结果 */
+/** Summary compaction result */
 export type SummaryCompactionResult = {
-  /** 保留的消息（包含摘要消息） */
+  /** Kept messages (including summary message) */
   kept: AgentMessage[];
-  /** 移除的消息数量 */
+  /** Number of removed messages */
   removedCount: number;
-  /** 移除的 token 数 */
+  /** Tokens removed */
   tokensRemoved: number;
-  /** 保留的 token 数 */
+  /** Tokens kept */
   tokensKept: number;
-  /** 生成的摘要 */
+  /** Generated summary */
   summary: string;
-  /** compaction 原因 */
+  /** Compaction reason */
   reason: "summary";
 };
 
-/** 摘要 Compaction 参数 */
+/** Summary compaction parameters */
 export type SummaryCompactionParams = {
-  /** 消息列表 */
+  /** Message list */
   messages: AgentMessage[];
-  /** LLM Model（用于生成摘要） */
+  /** LLM Model (for generating summary) */
   model: Model<any>;
   /** API Key */
   apiKey: string;
-  /** 可用 token 数 */
+  /** Available tokens */
   availableTokens: number;
-  /** 目标利用率 (0-1)，默认 0.5 */
+  /** Target utilization ratio (0-1), defaults to 0.5 */
   targetRatio?: number | undefined;
-  /** 最少保留消息数，默认 10 */
+  /** Minimum messages to keep, defaults to 10 */
   minKeepMessages?: number | undefined;
-  /** 预留给摘要生成的 token 数，默认 2048 */
+  /** Tokens reserved for summary generation, defaults to 2048 */
   reserveTokens?: number | undefined;
-  /** 自定义摘要指令 */
+  /** Custom summary instructions */
   customInstructions?: string | undefined;
-  /** 之前的摘要（用于增量更新） */
+  /** Previous summary (for incremental update) */
   previousSummary?: string | undefined;
   /** AbortSignal */
   signal?: AbortSignal | undefined;
@@ -59,7 +59,7 @@ const DEFAULT_SUMMARY_INSTRUCTIONS = `Summarize the conversation history concise
 Keep the summary concise but complete. Use bullet points for clarity.`;
 
 /**
- * 将消息分割为需要摘要的部分和保留的部分
+ * Split messages into parts to summarize and parts to keep
  */
 export function splitMessagesForSummary(
   messages: AgentMessage[],
@@ -73,18 +73,18 @@ export function splitMessagesForSummary(
   const minKeep = options?.minKeepMessages ?? 10;
 
   if (messages.length <= minKeep) {
-    return null; // 消息太少，不需要压缩
+    return null; // Too few messages, no compression needed
   }
 
   const totalTokens = estimateMessagesTokens(messages);
   const targetTokens = Math.floor(availableTokens * targetRatio);
 
-  // 如果当前已经在目标内，不需要压缩
+  // If already within target, no compression needed
   if (totalTokens <= targetTokens) {
     return null;
   }
 
-  // 从后往前保留消息
+  // Keep messages from back to front
   const toKeep: AgentMessage[] = [];
   let keptTokens = 0;
 
@@ -92,19 +92,19 @@ export function splitMessagesForSummary(
     const msg = messages[i]!;
     const msgTokens = estimateTokens(msg);
 
-    // 检查是否可以添加这条消息
+    // Check if this message can be added
     if (keptTokens + msgTokens <= targetTokens || toKeep.length < minKeep) {
       toKeep.unshift(msg);
       keptTokens += msgTokens;
     }
 
-    // 如果已经达到最小保留数且超过目标，停止
+    // If minimum keep count reached and exceeds target, stop
     if (toKeep.length >= minKeep && keptTokens >= targetTokens) {
       break;
     }
   }
 
-  // 需要摘要的消息
+  // Messages to summarize
   const toSummarize = messages.slice(0, messages.length - toKeep.length);
 
   if (toSummarize.length === 0) {
@@ -115,7 +115,7 @@ export function splitMessagesForSummary(
 }
 
 /**
- * 创建摘要消息
+ * Create summary message
  */
 function createSummaryMessage(summary: string, previousSummary?: string): AgentMessage {
   const content = previousSummary
@@ -130,9 +130,9 @@ function createSummaryMessage(summary: string, previousSummary?: string): AgentM
 }
 
 /**
- * 执行摘要式 Compaction
+ * Execute summary-based compaction
  *
- * 使用 LLM 生成历史消息的摘要，然后将摘要和最近的消息组合
+ * Uses LLM to generate summary of historical messages, then combines summary with recent messages
  */
 export async function compactMessagesWithSummary(
   params: SummaryCompactionParams,
@@ -162,7 +162,7 @@ export async function compactMessagesWithSummary(
 
   const { toSummarize, toKeep } = split;
 
-  // 生成摘要
+  // Generate summary
   const instructions = customInstructions || DEFAULT_SUMMARY_INSTRUCTIONS;
   const summary = await generateSummary(
     toSummarize,
@@ -174,10 +174,10 @@ export async function compactMessagesWithSummary(
     previousSummary,
   );
 
-  // 创建摘要消息
+  // Create summary message
   const summaryMessage = createSummaryMessage(summary, previousSummary);
 
-  // 组合结果
+  // Combine results
   const kept = [summaryMessage, ...toKeep];
 
   const tokensRemoved = estimateMessagesTokens(toSummarize);
@@ -194,9 +194,9 @@ export async function compactMessagesWithSummary(
 }
 
 /**
- * 分块生成摘要（用于超大历史）
+ * Generate summary in chunks (for very large history)
  *
- * 当历史太大时，分块生成摘要然后合并
+ * When history is too large, generate summaries by chunks then merge
  */
 export async function compactMessagesWithChunkedSummary(
   params: SummaryCompactionParams & {
@@ -217,7 +217,7 @@ export async function compactMessagesWithChunkedSummary(
     maxChunkTokens = 50000,
   } = params;
 
-  // 分割消息
+  // Split messages
   const split = splitMessagesForSummary(messages, availableTokens, {
     targetRatio,
     minKeepMessages,
@@ -229,13 +229,13 @@ export async function compactMessagesWithChunkedSummary(
 
   const { toSummarize, toKeep } = split;
 
-  // 如果需要摘要的消息不多，直接摘要
+  // If messages to summarize are not many, summarize directly
   const toSummarizeTokens = estimateMessagesTokens(toSummarize);
   if (toSummarizeTokens <= maxChunkTokens) {
     return compactMessagesWithSummary(params);
   }
 
-  // 分块处理
+  // Process in chunks
   const chunks: AgentMessage[][] = [];
   let currentChunk: AgentMessage[] = [];
   let currentTokens = 0;
@@ -257,7 +257,7 @@ export async function compactMessagesWithChunkedSummary(
     chunks.push(currentChunk);
   }
 
-  // 为每个块生成摘要
+  // Generate summary for each chunk
   const instructions = customInstructions || DEFAULT_SUMMARY_INSTRUCTIONS;
   const chunkSummaries: string[] = [];
 
@@ -276,13 +276,13 @@ export async function compactMessagesWithChunkedSummary(
     runningContext = chunkSummary;
   }
 
-  // 最终摘要就是最后一个块的摘要（已经包含了之前的上下文）
+  // Final summary is the last chunk's summary (already includes previous context)
   const finalSummary = chunkSummaries[chunkSummaries.length - 1] ?? "";
 
-  // 创建摘要消息
+  // Create summary message
   const summaryMessage = createSummaryMessage(finalSummary);
 
-  // 组合结果
+  // Combine results
   const kept = [summaryMessage, ...toKeep];
 
   const tokensRemoved = estimateMessagesTokens(toSummarize);
