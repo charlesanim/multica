@@ -8,9 +8,11 @@
     "dev": "tsx src/index.ts",
     "dev:gateway": "tsx --watch src/gateway/main.ts",
     "dev:console": "tsx --watch src/console/main.ts",
-    "build": "tsc",
+    "dev:web": "pnpm --filter @multica/web dev",
+    "build": "turbo build",
+    "build:sdk": "pnpm --filter @multica/sdk build",
     "start": "node dist/index.js",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "turbo typecheck"
   },
   "keywords": [],
   "author": "",
@@ -20,6 +22,7 @@
     "@types/node": "^25.0.10",
     "@types/uuid": "^11.0.0",
     "tsx": "^4.21.0",
+    "turbo": "^2.3.4",
     "typescript": "^5.9.3"
   },
   "dependencies": {
