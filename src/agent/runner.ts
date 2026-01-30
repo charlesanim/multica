@@ -90,8 +90,9 @@ export class Agent {
     this.output = createAgentOutput({ stdout, stderr });
     this.debug = options.debug ?? false;
 
-    // Resolve provider for API key and base URL
-    const resolvedProvider = options.provider ?? "kimi-coding";
+    // Resolve provider and model from options > env vars > defaults
+    const resolvedProvider = options.provider ?? process.env.AGENT_PROVIDER ?? "kimi-coding";
+    const resolvedModel = options.model ?? process.env.AGENT_MODEL;
     const apiKey = resolveApiKey(resolvedProvider, options.apiKey);
 
     this.agent = new PiAgentCore(
@@ -142,11 +143,9 @@ export class Agent {
       return tempSession.getMeta();
     })();
 
-    let model = options.provider && options.model ? resolveModel(options) : resolveModel({
-      ...options,
-      provider: storedMeta?.provider,
-      model: storedMeta?.model,
-    });
+    const effectiveProvider = resolvedModel ? resolvedProvider : (options.provider ?? storedMeta?.provider);
+    const effectiveModel = resolvedModel ?? options.model ?? storedMeta?.model;
+    let model = resolveModel({ ...options, provider: effectiveProvider, model: effectiveModel });
 
     // Override base URL if provided via options or environment variable
     const baseUrl = resolveBaseUrl(model.provider, options.baseUrl);
