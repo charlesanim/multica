@@ -72,6 +72,36 @@ function resolveBaseUrl(provider: string, explicitUrl?: string): string | undefi
   return process.env[`${normalizedProvider}_BASE_URL`];
 }
 
+/**
+ * Get Model ID based on provider.
+ * Priority: explicit model > provider-specific env var > generic env var format.
+ */
+function resolveModelId(provider: string, explicitModel?: string): string | undefined {
+  if (explicitModel) return explicitModel;
+
+  const providerEnvMap: Record<string, string> = {
+    openai: "OPENAI_MODEL",
+    anthropic: "ANTHROPIC_MODEL",
+    google: "GOOGLE_MODEL",
+    "google-genai": "GOOGLE_MODEL",
+    kimi: "MOONSHOT_MODEL",
+    "kimi-coding": "MOONSHOT_MODEL",
+    deepseek: "DEEPSEEK_MODEL",
+    groq: "GROQ_MODEL",
+    mistral: "MISTRAL_MODEL",
+    together: "TOGETHER_MODEL",
+  };
+
+  const envVar = providerEnvMap[provider];
+  if (envVar) {
+    return process.env[envVar];
+  }
+
+  // Try generic format: PROVIDER_MODEL
+  const normalizedProvider = provider.toUpperCase().replace(/-/g, "_");
+  return process.env[`${normalizedProvider}_MODEL`];
+}
+
 export class Agent {
   private readonly agent: PiAgentCore;
   private readonly output;
@@ -91,8 +121,8 @@ export class Agent {
     this.debug = options.debug ?? false;
 
     // Resolve provider and model from options > env vars > defaults
-    const resolvedProvider = options.provider ?? process.env.AGENT_PROVIDER ?? "kimi-coding";
-    const resolvedModel = options.model ?? process.env.AGENT_MODEL;
+    const resolvedProvider = options.provider ?? process.env.LLM_PROVIDER ?? "kimi-coding";
+    const resolvedModel = resolveModelId(resolvedProvider, options.model);
     const apiKey = resolveApiKey(resolvedProvider, options.apiKey);
 
     this.agent = new PiAgentCore(
