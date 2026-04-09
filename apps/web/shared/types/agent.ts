@@ -49,6 +49,7 @@ export interface Agent {
   visibility: AgentVisibility;
   status: AgentStatus;
   max_concurrent_tasks: number;
+  model: string;
   owner_id: string | null;
   skills: Skill[];
   created_at: string;
@@ -66,6 +67,7 @@ export interface CreateAgentRequest {
   runtime_config?: Record<string, unknown>;
   visibility?: AgentVisibility;
   max_concurrent_tasks?: number;
+  model?: string;
 }
 
 export interface UpdateAgentRequest {
@@ -78,6 +80,7 @@ export interface UpdateAgentRequest {
   visibility?: AgentVisibility;
   status?: AgentStatus;
   max_concurrent_tasks?: number;
+  model?: string;
 }
 
 // Skills

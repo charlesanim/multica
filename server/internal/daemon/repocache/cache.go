@@ -145,8 +145,16 @@ func gitCloneBare(url, dest string) error {
 
 func gitFetch(barePath string) error {
 	cmd := exec.Command("git", "-C", barePath, "fetch", "origin")
-	if out, err := cmd.CombinedOutput(); err != nil {
-		return fmt.Errorf("git fetch: %s: %w", strings.TrimSpace(string(out)), err)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		msg := strings.TrimSpace(string(out))
+		// When worktrees have branches checked out, git refuses to update
+		// those refs during fetch. This is expected and non-fatal — the
+		// worktree already has its branch and other refs still update fine.
+		if strings.Contains(msg, "refusing to fetch into branch") {
+			return nil
+		}
+		return fmt.Errorf("git fetch: %s: %w", msg, err)
 	}
 	return nil
 }
