@@ -733,6 +733,9 @@ function SettingsTab({
   const [description, setDescription] = useState(agent.description ?? "");
   const [visibility, setVisibility] = useState<AgentVisibility>(agent.visibility);
   const [maxTasks, setMaxTasks] = useState(agent.max_concurrent_tasks);
+  const [runtimeId, setRuntimeId] = useState(agent.runtime_id);
+  const [model, setModel] = useState(agent.model ?? "");
+  const [runtimeOpen, setRuntimeOpen] = useState(false);
   const [saving, setSaving] = useState(false);
   const { upload, uploading } = useFileUpload();
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -755,7 +758,9 @@ function SettingsTab({
     name !== agent.name ||
     description !== (agent.description ?? "") ||
     visibility !== agent.visibility ||
-    maxTasks !== agent.max_concurrent_tasks;
+    maxTasks !== agent.max_concurrent_tasks ||
+    runtimeId !== agent.runtime_id ||
+    model !== (agent.model ?? "");
 
   const handleSave = async () => {
     if (!name.trim()) {
@@ -764,7 +769,17 @@ function SettingsTab({
     }
     setSaving(true);
     try {
-      await onSave({ name: name.trim(), description, visibility, max_concurrent_tasks: maxTasks });
+      const updates: Partial<Agent> & { runtime_id?: string; model?: string } = {
+        name: name.trim(),
+        description,
+        visibility,
+        max_concurrent_tasks: maxTasks,
+        model,
+      };
+      if (runtimeId !== agent.runtime_id) {
+        updates.runtime_id = runtimeId;
+      }
+      await onSave(updates);
       toast.success("Settings saved");
     } catch {
       toast.error("Failed to save settings");
@@ -773,7 +788,7 @@ function SettingsTab({
     }
   };
 
-  const runtimeDevice = runtimes.find((r) => r.id === agent.runtime_id);
+  const selectedRuntime = runtimes.find((r) => r.id === runtimeId);
 
   return (
     <div className="max-w-lg space-y-6">
@@ -877,14 +892,58 @@ function SettingsTab({
 
       <div>
         <Label className="text-xs text-muted-foreground">Runtime</Label>
-        <div className="mt-1 flex items-center gap-2 rounded-lg border px-3 py-2.5 text-sm text-muted-foreground">
-          {agent.runtime_mode === "cloud" ? (
-            <Cloud className="h-4 w-4" />
-          ) : (
-            <Monitor className="h-4 w-4" />
-          )}
-          {runtimeDevice?.name ?? (agent.runtime_mode === "cloud" ? "Cloud" : "Local")}
-        </div>
+        <Popover open={runtimeOpen} onOpenChange={setRuntimeOpen}>
+          <PopoverTrigger
+            className="mt-1 flex w-full items-center justify-between rounded-lg border px-3 py-2.5 text-sm transition-colors hover:bg-muted"
+          >
+              <div className="flex items-center gap-2">
+                {selectedRuntime?.runtime_mode === "cloud" ? (
+                  <Cloud className="h-4 w-4 text-muted-foreground" />
+                ) : (
+                  <Monitor className="h-4 w-4 text-muted-foreground" />
+                )}
+                <span>{selectedRuntime?.name ?? "Select runtime"}</span>
+                {selectedRuntime && (
+                  <span className={`ml-1 inline-block h-1.5 w-1.5 rounded-full ${selectedRuntime.status === "online" ? "bg-success" : "bg-muted-foreground/40"}`} />
+                )}
+              </div>
+              <ChevronDown className="h-4 w-4 text-muted-foreground" />
+          </PopoverTrigger>
+          <PopoverContent className="w-[var(--radix-popover-trigger-width)] p-1" align="start">
+            {runtimes.map((rt) => (
+              <button
+                key={rt.id}
+                type="button"
+                onClick={() => { setRuntimeId(rt.id); setRuntimeOpen(false); }}
+                className={`flex w-full items-center gap-2 rounded-md px-2 py-2 text-sm transition-colors hover:bg-muted ${rt.id === runtimeId ? "bg-muted" : ""}`}
+              >
+                {rt.runtime_mode === "cloud" ? (
+                  <Cloud className="h-4 w-4 shrink-0 text-muted-foreground" />
+                ) : (
+                  <Monitor className="h-4 w-4 shrink-0 text-muted-foreground" />
+                )}
+                <div className="flex-1 text-left">
+                  <div className="font-medium">{rt.name}</div>
+                  <div className="text-xs text-muted-foreground">{rt.device_info}</div>
+                </div>
+                <span className={`inline-block h-1.5 w-1.5 rounded-full ${rt.status === "online" ? "bg-success" : "bg-muted-foreground/40"}`} />
+              </button>
+            ))}
+          </PopoverContent>
+        </Popover>
+      </div>
+
+      <div>
+        <Label className="text-xs text-muted-foreground">Model</Label>
+        <Input
+          value={model}
+          onChange={(e) => setModel(e.target.value)}
+          placeholder="e.g. claude-sonnet-4-5, o3, gpt-4.1 (leave empty for runtime default)"
+          className="mt-1"
+        />
+        <p className="mt-1 text-xs text-muted-foreground">
+          Override the default model for this agent&apos;s runtime. Leave empty to use the runtime default.
+        </p>
       </div>
 
       <Button onClick={handleSave} disabled={!dirty || saving} size="sm">

@@ -242,6 +242,7 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 			ID:           uuidToString(agent.ID),
 			Name:         agent.Name,
 			Instructions: agent.Instructions,
+			Model:        agent.Model,
 			Skills:       skills,
 		}
 	}
