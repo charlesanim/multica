@@ -6,12 +6,12 @@ import (
 	"errors"
 	"log/slog"
 	"net/http"
+	"strconv"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgtype"
-	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/internal/auth"
 	"github.com/multica-ai/multica/server/internal/events"
 	"github.com/multica-ai/multica/server/internal/middleware"
@@ -19,6 +19,7 @@ import (
 	"github.com/multica-ai/multica/server/internal/service"
 	"github.com/multica-ai/multica/server/internal/storage"
 	"github.com/multica-ai/multica/server/internal/util"
+	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
 
 type txStarter interface {
@@ -77,14 +78,14 @@ func writeError(w http.ResponseWriter, status int, msg string) {
 }
 
 // Thin wrappers around util functions (preserve existing handler code unchanged).
-func parseUUID(s string) pgtype.UUID       { return util.ParseUUID(s) }
-func uuidToString(u pgtype.UUID) string    { return util.UUIDToString(u) }
-func textToPtr(t pgtype.Text) *string      { return util.TextToPtr(t) }
-func ptrToText(s *string) pgtype.Text      { return util.PtrToText(s) }
-func strToText(s string) pgtype.Text       { return util.StrToText(s) }
+func parseUUID(s string) pgtype.UUID                { return util.ParseUUID(s) }
+func uuidToString(u pgtype.UUID) string             { return util.UUIDToString(u) }
+func textToPtr(t pgtype.Text) *string               { return util.TextToPtr(t) }
+func ptrToText(s *string) pgtype.Text               { return util.PtrToText(s) }
+func strToText(s string) pgtype.Text                { return util.StrToText(s) }
 func timestampToString(t pgtype.Timestamptz) string { return util.TimestampToString(t) }
 func timestampToPtr(t pgtype.Timestamptz) *string   { return util.TimestampToPtr(t) }
-func uuidToPtr(u pgtype.UUID) *string      { return util.UUIDToPtr(u) }
+func uuidToPtr(u pgtype.UUID) *string               { return util.UUIDToPtr(u) }
 
 // publish sends a domain event through the event bus.
 func (h *Handler) publish(eventType, workspaceID, actorType, actorID string, payload any) {
@@ -309,12 +310,14 @@ func splitIdentifier(id string) *identifierParts {
 		return nil
 	}
 	numStr := id[idx+1:]
-	num := 0
 	for _, c := range numStr {
 		if c < '0' || c > '9' {
 			return nil
 		}
-		num = num*10 + int(c-'0')
+	}
+	num, err := strconv.ParseInt(numStr, 10, 32)
+	if err != nil {
+		return nil
 	}
 	if num <= 0 {
 		return nil

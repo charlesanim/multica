@@ -471,6 +471,63 @@ func TestVerifyCode(t *testing.T) {
 	}
 }
 
+func TestLocalLoginDisabled(t *testing.T) {
+	t.Setenv("MULTICA_LOCAL_MODE", "false")
+
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest("POST", "/auth/local-login", strings.NewReader(`{}`))
+	req.Header.Set("Content-Type", "application/json")
+
+	testHandler.LocalLogin(w, req)
+	if w.Code != http.StatusNotFound {
+		t.Fatalf("LocalLogin disabled: expected 404, got %d: %s", w.Code, w.Body.String())
+	}
+}
+
+func TestLocalLoginEnabled(t *testing.T) {
+	const email = "local-login-test@multica.ai"
+	ctx := context.Background()
+
+	t.Setenv("MULTICA_LOCAL_MODE", "true")
+	t.Setenv("APP_ENV", "development")
+
+	t.Cleanup(func() {
+		user, err := testHandler.Queries.GetUserByEmail(ctx, email)
+		if err == nil {
+			workspaces, listErr := testHandler.Queries.ListWorkspaces(ctx, user.ID)
+			if listErr == nil {
+				for _, workspace := range workspaces {
+					_ = testHandler.Queries.DeleteWorkspace(ctx, workspace.ID)
+				}
+			}
+		}
+		testPool.Exec(ctx, `DELETE FROM "user" WHERE email = $1`, email)
+	})
+
+	w := httptest.NewRecorder()
+	body := map[string]string{"email": email}
+	var buf bytes.Buffer
+	_ = json.NewEncoder(&buf).Encode(body)
+	req := httptest.NewRequest("POST", "/auth/local-login", &buf)
+	req.Header.Set("Content-Type", "application/json")
+
+	testHandler.LocalLogin(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("LocalLogin enabled: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var resp LoginResponse
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("LocalLogin decode response: %v", err)
+	}
+	if resp.Token == "" {
+		t.Fatal("LocalLogin: expected non-empty token")
+	}
+	if resp.User.Email != email {
+		t.Fatalf("LocalLogin: expected email '%s', got '%s'", email, resp.User.Email)
+	}
+}
+
 func TestVerifyCodeWrongCode(t *testing.T) {
 	const email = "wrong-code-test@multica.ai"
 	ctx := context.Background()
@@ -656,11 +713,11 @@ func TestResolveActor(t *testing.T) {
 	})
 
 	tests := []struct {
-		name            string
-		agentIDHeader   string
-		taskIDHeader    string
-		wantActorType   string
-		wantIsAgent     bool
+		name          string
+		agentIDHeader string
+		taskIDHeader  string
+		wantActorType string
+		wantIsAgent   bool
 	}{
 		{
 			name:          "no headers returns member",

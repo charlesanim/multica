@@ -65,7 +65,7 @@ func (h *Handler) ListComments(w http.ResponseWriter, r *http.Request) {
 	var limit, offset int32
 	var hasPagination bool
 	if v := q.Get("limit"); v != "" {
-		n, err := strconv.Atoi(v)
+		n, err := strconv.ParseInt(v, 10, 32)
 		if err != nil || n < 1 {
 			writeError(w, http.StatusBadRequest, "invalid limit parameter")
 			return
@@ -74,7 +74,7 @@ func (h *Handler) ListComments(w http.ResponseWriter, r *http.Request) {
 		hasPagination = true
 	}
 	if v := q.Get("offset"); v != "" {
-		n, err := strconv.Atoi(v)
+		n, err := strconv.ParseInt(v, 10, 32)
 		if err != nil || n < 0 {
 			writeError(w, http.StatusBadRequest, "invalid offset parameter")
 			return

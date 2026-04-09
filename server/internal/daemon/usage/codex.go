@@ -38,8 +38,8 @@ func (s *Scanner) scanCodex() []Record {
 // codexLogRoot returns the Codex sessions directory.
 func codexLogRoot() string {
 	if codexHome := os.Getenv("CODEX_HOME"); codexHome != "" {
-		dir := filepath.Join(codexHome, "sessions")
-		if info, err := os.Stat(dir); err == nil && info.IsDir() {
+		dir := filepath.Join(codexHome, "sessions")                // #nosec G703 -- CODEX_HOME is local runtime configuration.
+		if info, err := os.Stat(dir); err == nil && info.IsDir() { // #nosec G703 -- CODEX_HOME is local runtime configuration.
 			return dir
 		}
 	}

@@ -5,11 +5,11 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
+	"log/slog"
 	"os"
+	"strings"
 	"sync"
 )
-
-const defaultJWTSecret = "multica-dev-secret-change-in-production"
 
 var (
 	jwtSecret     []byte
@@ -18,11 +18,18 @@ var (
 
 func JWTSecret() []byte {
 	jwtSecretOnce.Do(func() {
-		secret := os.Getenv("JWT_SECRET")
-		if secret == "" {
-			secret = defaultJWTSecret
+		secret := strings.TrimSpace(os.Getenv("JWT_SECRET"))
+		if secret != "" {
+			jwtSecret = []byte(secret)
+			return
 		}
-		jwtSecret = []byte(secret)
+
+		ephemeral := make([]byte, 32)
+		if _, err := rand.Read(ephemeral); err != nil {
+			panic(fmt.Errorf("generate JWT secret: %w", err))
+		}
+		slog.Warn("JWT_SECRET is not set; using an ephemeral in-memory secret for this process")
+		jwtSecret = ephemeral
 	})
 
 	return jwtSecret

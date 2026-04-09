@@ -32,29 +32,13 @@ cp .env.example .env
 Edit `.env` with your production values (see [Configuration](#configuration) below), then:
 
 ```bash
-# Start PostgreSQL
-docker compose up -d
-
-# Build the backend
-make build
-
-# Run database migrations
-DATABASE_URL="your-database-url" ./server/bin/migrate up
-
-# Start the backend server
-DATABASE_URL="your-database-url" PORT=8080 ./server/bin/server
+docker compose up --build -d
+docker compose ps
 ```
 
-For the frontend:
-
-```bash
-pnpm install
-pnpm build
-
-# Start the frontend (production mode)
-cd apps/web
-REMOTE_API_URL=http://localhost:8080 pnpm start
-```
+This boots PostgreSQL, runs migrations, and starts backend (`:8080`) + frontend (`:3000`) in one command.
+If those host ports are occupied, override them when starting compose (for example: `PORT=8090 FRONTEND_PORT=3900 docker compose up --build -d`).
+For fully local development without the login flow, enable local mode (for example: `MULTICA_LOCAL_MODE=true NEXT_PUBLIC_LOCAL_MODE=true docker compose up --build -d`).
 
 ## Configuration
 
@@ -104,6 +88,7 @@ For file uploads and attachments, configure S3 and CloudFront:
 |----------|---------|-------------|
 | `PORT` | `8080` | Backend server port |
 | `FRONTEND_PORT` | `3000` | Frontend port |
+| `MULTICA_LOCAL_MODE` | `false` | Enable `/auth/local-login` (dev-only local auto-login; never enable in production) |
 | `CORS_ALLOWED_ORIGINS` | Value of `FRONTEND_ORIGIN` | Comma-separated list of allowed origins |
 | `LOG_LEVEL` | `info` | Log level: `debug`, `info`, `warn`, `error` |
 
@@ -252,6 +237,7 @@ Each team member who wants to run AI agents locally needs to:
 2. **Install an AI agent CLI** — at least one of:
    - [Claude Code](https://docs.anthropic.com/en/docs/claude-code) (`claude` on PATH)
    - [Codex](https://github.com/openai/codex) (`codex` on PATH)
+   - [GitHub Copilot CLI](https://docs.github.com/copilot/how-tos/copilot-cli) (`copilot` on PATH)
 
 3. **Authenticate and start**
 
@@ -266,10 +252,24 @@ Each team member who wants to run AI agents locally needs to:
    # export MULTICA_APP_URL=http://localhost:3000
    # export MULTICA_SERVER_URL=ws://localhost:8080/ws
 
-   # Login (opens browser)
-   multica login
+    # Login (opens browser)
+    multica login
 
-   # Start the daemon
+    # Start the daemon
+    multica daemon start
+    ```
+
+   **No-login local mode (self-host only):**
+
+   ```bash
+   # Local backend/frontend with local auth mode enabled
+   export MULTICA_SERVER_URL=ws://localhost:8080/ws
+   export MULTICA_LOCAL_MODE=true
+
+   # Optional: choose model for Codex provider (example)
+   export MULTICA_CODEX_MODEL=gpt-5.3-codex
+
+   # Start daemon without running `multica login`
    multica daemon start
    ```
 

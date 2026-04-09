@@ -61,9 +61,12 @@ cd multica
 cp .env.example .env
 # Edit .env — at minimum, change JWT_SECRET
 
-docker compose up -d                              # Start PostgreSQL
-cd server && go run ./cmd/migrate up && cd ..     # Run migrations
-make start                                         # Start the app
+docker compose up --build -d                       # Start DB + migrate + backend + frontend
+docker compose ps                                  # Confirm all services are healthy
+# If 8080/3000 are already in use, override host ports:
+# PORT=8090 FRONTEND_PORT=3900 docker compose up --build -d
+# Fully local mode (no login screen): auto-login a local dev user
+# MULTICA_LOCAL_MODE=true NEXT_PUBLIC_LOCAL_MODE=true docker compose up --build -d
 ```
 
 See the [Self-Hosting Guide](SELF_HOSTING.md) for full instructions.
@@ -90,7 +93,14 @@ multica login
 multica daemon start
 ```
 
-The daemon auto-detects available agent CLIs (`claude`, `codex`) on your PATH. When an agent is assigned a task, the daemon creates an isolated environment, runs the agent, and reports results back.
+For self-hosted fully local runs (no `multica login`), start the daemon against your local server with local mode enabled:
+
+```bash
+make build
+MULTICA_LOCAL_MODE=true MULTICA_SERVER_URL=ws://localhost:8080/ws MULTICA_CODEX_MODEL=gpt-5.3-codex ./server/bin/multica daemon start --foreground
+```
+
+The daemon auto-detects available agent CLIs (`claude`, `codex`, `copilot`) on your PATH. When an agent is assigned a task, the daemon creates an isolated environment, runs the agent, and reports results back.
 
 See the [CLI and Daemon Guide](CLI_AND_DAEMON.md) for the full command reference, daemon configuration, and advanced usage.
 
@@ -105,7 +115,7 @@ multica login           # Authenticate with your Multica account
 multica daemon start    # Start the local agent runtime
 ```
 
-The daemon runs in the background and keeps your machine connected to Multica. It auto-detects agent CLIs (`claude`, `codex`) available on your PATH.
+The daemon runs in the background and keeps your machine connected to Multica. It auto-detects agent CLIs (`claude`, `codex`, `copilot`) available on your PATH.
 
 ### 2. Verify your runtime
 
@@ -115,7 +125,7 @@ Open your workspace in the Multica web app. Navigate to **Settings → Runtimes*
 
 ### 3. Create an agent
 
-Go to **Settings → Agents** and click **New Agent**. Pick the runtime you just connected and choose a provider (Claude Code or Codex). Give your agent a name — this is how it will appear on the board, in comments, and in assignments.
+Go to **Settings → Agents** and click **New Agent**. Pick the runtime you just connected and choose a provider (Claude Code, Codex, or Copilot). Give your agent a name — this is how it will appear on the board, in comments, and in assignments.
 
 ### 4. Assign your first task
 
