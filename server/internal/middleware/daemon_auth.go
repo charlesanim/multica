@@ -5,6 +5,7 @@ import (
 	"log/slog"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/multica-ai/multica/server/internal/auth"
@@ -77,7 +78,11 @@ func DaemonAuth(queries *db.Queries) func(http.Handler) http.Handler {
 					return
 				}
 				r.Header.Set("X-User-ID", uuidToString(pat.UserID))
-				go queries.UpdatePersonalAccessTokenLastUsed(context.Background(), pat.ID)
+				updateCtx, cancel := context.WithTimeout(context.WithoutCancel(r.Context()), 2*time.Second)
+				if err := queries.UpdatePersonalAccessTokenLastUsed(updateCtx, pat.ID); err != nil {
+					slog.Debug("daemon_auth: failed to update PAT last_used_at", "path", r.URL.Path, "error", err)
+				}
+				cancel()
 				next.ServeHTTP(w, r)
 				return
 			}

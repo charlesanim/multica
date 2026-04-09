@@ -128,7 +128,7 @@ func (h *Handler) GetRuntimeUsage(w http.ResponseWriter, r *http.Request) {
 
 	limit := int32(90)
 	if l := r.URL.Query().Get("days"); l != "" {
-		if parsed, err := strconv.Atoi(l); err == nil && parsed > 0 && parsed <= 365 {
+		if parsed, err := strconv.ParseInt(l, 10, 32); err == nil && parsed > 0 && parsed <= 365 {
 			limit = int32(parsed)
 		}
 	}
@@ -274,8 +274,8 @@ func (h *Handler) GetWorkspaceUsageSummary(w http.ResponseWriter, r *http.Reques
 func parseSinceParam(r *http.Request, defaultDays int) pgtype.Timestamptz {
 	days := defaultDays
 	if d := r.URL.Query().Get("days"); d != "" {
-		if parsed, err := strconv.Atoi(d); err == nil && parsed > 0 && parsed <= 365 {
-			days = parsed
+		if parsed, err := strconv.ParseInt(d, 10, 32); err == nil && parsed > 0 && parsed <= 365 {
+			days = int(parsed)
 		}
 	}
 	t := time.Now().AddDate(0, 0, -days)

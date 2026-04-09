@@ -144,6 +144,14 @@ export class ApiClient {
     });
   }
 
+  async localLogin(email?: string): Promise<LoginResponse> {
+    const body = email ? { email } : {};
+    return this.fetch("/auth/local-login", {
+      method: "POST",
+      body: JSON.stringify(body),
+    });
+  }
+
   async googleLogin(code: string, redirectUri: string): Promise<LoginResponse> {
     return this.fetch("/auth/google", {
       method: "POST",

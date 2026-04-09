@@ -42,6 +42,8 @@ multica daemon start
 
 `multica login` automatically discovers all workspaces you belong to and adds them to the daemon watch list.
 
+For self-hosted local development, you can skip `multica login` by enabling local mode on the server and daemon (`MULTICA_LOCAL_MODE=true`).
+
 ## Authentication
 
 ### Browser Login
@@ -125,6 +127,7 @@ The daemon auto-detects these AI CLIs on your PATH:
 |-----|---------|-------------|
 | [Claude Code](https://docs.anthropic.com/en/docs/claude-code) | `claude` | Anthropic's coding agent |
 | [Codex](https://github.com/openai/codex) | `codex` | OpenAI's coding agent |
+| [GitHub Copilot CLI](https://docs.github.com/copilot/how-tos/copilot-cli) | `copilot` | GitHub's coding agent |
 
 You need at least one installed. The daemon registers each detected CLI as an available runtime.
 
@@ -150,6 +153,7 @@ Daemon behavior is configured via flags or environment variables:
 | Device name | `--device-name` | `MULTICA_DAEMON_DEVICE_NAME` | hostname |
 | Runtime name | `--runtime-name` | `MULTICA_AGENT_RUNTIME_NAME` | `Local Agent` |
 | Workspaces root | — | `MULTICA_WORKSPACES_ROOT` | `~/multica_workspaces` |
+| Local auth mode | — | `MULTICA_LOCAL_MODE` | `false` |
 
 Agent-specific overrides:
 
@@ -159,6 +163,8 @@ Agent-specific overrides:
 | `MULTICA_CLAUDE_MODEL` | Override the Claude model used |
 | `MULTICA_CODEX_PATH` | Custom path to the `codex` binary |
 | `MULTICA_CODEX_MODEL` | Override the Codex model used |
+| `MULTICA_COPILOT_PATH` | Custom path to the `copilot` binary |
+| `MULTICA_COPILOT_MODEL` | Override the Copilot model used |
 
 ### Self-Hosted Server
 
@@ -169,6 +175,16 @@ export MULTICA_APP_URL=https://app.example.com
 export MULTICA_SERVER_URL=wss://api.example.com/ws
 
 multica login
+multica daemon start
+```
+
+For local self-hosted development with local mode enabled on the server:
+
+```bash
+export MULTICA_SERVER_URL=ws://localhost:8080/ws
+export MULTICA_LOCAL_MODE=true
+export MULTICA_CODEX_MODEL=gpt-5.3-codex   # optional model override
+
 multica daemon start
 ```
 

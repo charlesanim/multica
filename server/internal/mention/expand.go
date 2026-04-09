@@ -84,7 +84,7 @@ func ExpandIssueIdentifiers(ctx context.Context, resolver Resolver, workspaceID 
 			continue
 		}
 
-		num, err := strconv.Atoi(numStr)
+		num, err := strconv.ParseInt(numStr, 10, 32)
 		if err != nil || num <= 0 {
 			continue
 		}

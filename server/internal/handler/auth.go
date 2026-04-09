@@ -56,6 +56,10 @@ type VerifyCodeRequest struct {
 	Code  string `json:"code"`
 }
 
+type LocalLoginRequest struct {
+	Email string `json:"email"`
+}
+
 func defaultWorkspaceName(user db.User) string {
 	name := strings.TrimSpace(user.Name)
 	if name == "" {
@@ -181,6 +185,22 @@ func (h *Handler) issueJWT(user db.User) (string, error) {
 		"iat":   time.Now().Unix(),
 	})
 	return token.SignedString(auth.JWTSecret())
+}
+
+func localModeEnabled() bool {
+	if strings.EqualFold(strings.TrimSpace(os.Getenv("APP_ENV")), "production") {
+		return false
+	}
+	v := strings.ToLower(strings.TrimSpace(os.Getenv("MULTICA_LOCAL_MODE")))
+	return v == "1" || v == "true" || v == "yes" || v == "on"
+}
+
+func localLoginDefaultEmail() string {
+	email := strings.ToLower(strings.TrimSpace(os.Getenv("MULTICA_LOCAL_EMAIL")))
+	if email == "" {
+		return "local@localhost"
+	}
+	return email
 }
 
 func (h *Handler) findOrCreateUser(ctx context.Context, email string) (db.User, error) {
@@ -310,6 +330,54 @@ func (h *Handler) VerifyCode(w http.ResponseWriter, r *http.Request) {
 	}
 
 	slog.Info("user logged in", append(logger.RequestAttrs(r), "user_id", uuidToString(user.ID), "email", user.Email)...)
+	writeJSON(w, http.StatusOK, LoginResponse{
+		Token: tokenString,
+		User:  userToResponse(user),
+	})
+}
+
+func (h *Handler) LocalLogin(w http.ResponseWriter, r *http.Request) {
+	if !localModeEnabled() {
+		writeError(w, http.StatusNotFound, "not found")
+		return
+	}
+
+	var req LocalLoginRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil && err != io.EOF {
+		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+
+	email := strings.ToLower(strings.TrimSpace(req.Email))
+	if email == "" {
+		email = localLoginDefaultEmail()
+	}
+
+	user, err := h.findOrCreateUser(r.Context(), email)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to create user")
+		return
+	}
+
+	if err := h.ensureUserWorkspace(r.Context(), user); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to provision workspace")
+		return
+	}
+
+	tokenString, err := h.issueJWT(user)
+	if err != nil {
+		slog.Warn("local login failed", append(logger.RequestAttrs(r), "error", err, "email", email)...)
+		writeError(w, http.StatusInternalServerError, "failed to generate token")
+		return
+	}
+
+	if h.CFSigner != nil {
+		for _, cookie := range h.CFSigner.SignedCookies(time.Now().Add(30 * 24 * time.Hour)) {
+			http.SetCookie(w, cookie)
+		}
+	}
+
+	slog.Info("user logged in (local mode)", append(logger.RequestAttrs(r), "user_id", uuidToString(user.ID), "email", user.Email)...)
 	writeJSON(w, http.StatusOK, LoginResponse{
 		Token: tokenString,
 		User:  userToResponse(user),

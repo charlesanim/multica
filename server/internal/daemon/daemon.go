@@ -131,21 +131,41 @@ func (d *Daemon) deregisterRuntimes() {
 
 // resolveAuth loads the auth token from the CLI config for the active profile.
 func (d *Daemon) resolveAuth() error {
+	if token := strings.TrimSpace(os.Getenv("MULTICA_TOKEN")); token != "" {
+		d.client.SetToken(token)
+		d.logger.Info("authenticated from MULTICA_TOKEN")
+		return nil
+	}
+
 	cfg, err := cli.LoadCLIConfigForProfile(d.cfg.Profile)
 	if err != nil {
 		return fmt.Errorf("load CLI config: %w", err)
 	}
-	if cfg.Token == "" {
-		loginHint := "'multica login'"
-		if d.cfg.Profile != "" {
-			loginHint = fmt.Sprintf("'multica login --profile %s'", d.cfg.Profile)
-		}
-		d.logger.Warn("not authenticated — run " + loginHint + " to authenticate, then restart the daemon")
-		return fmt.Errorf("not authenticated: run %s first", loginHint)
+	if cfg.Token != "" {
+		d.client.SetToken(cfg.Token)
+		d.logger.Info("authenticated")
+		return nil
 	}
-	d.client.SetToken(cfg.Token)
-	d.logger.Info("authenticated")
-	return nil
+
+	if localModeEnabled() {
+		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+		defer cancel()
+
+		token, err := d.client.LocalLogin(ctx)
+		if err != nil {
+			return fmt.Errorf("local mode auth failed: %w", err)
+		}
+		d.client.SetToken(token)
+		d.logger.Info("authenticated via /auth/local-login")
+		return nil
+	}
+
+	loginHint := "'multica login'"
+	if d.cfg.Profile != "" {
+		loginHint = fmt.Sprintf("'multica login --profile %s'", d.cfg.Profile)
+	}
+	d.logger.Warn("not authenticated — run " + loginHint + " to authenticate, then restart the daemon")
+	return fmt.Errorf("not authenticated: run %s first", loginHint)
 }
 
 // loadWatchedWorkspaces reads watched workspaces from CLI config and registers runtimes.
@@ -155,12 +175,25 @@ func (d *Daemon) loadWatchedWorkspaces(ctx context.Context) error {
 		return fmt.Errorf("load CLI config: %w", err)
 	}
 
-	if len(cfg.WatchedWorkspaces) == 0 {
+	watched := cfg.WatchedWorkspaces
+	if len(watched) == 0 && localModeEnabled() {
+		apiCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
+		workspaces, listErr := d.client.ListWorkspaces(apiCtx)
+		cancel()
+		if listErr != nil {
+			return fmt.Errorf("list workspaces in local mode: %w", listErr)
+		}
+		for _, ws := range workspaces {
+			watched = append(watched, cli.WatchedWorkspace{ID: ws.ID, Name: ws.Name})
+		}
+	}
+
+	if len(watched) == 0 {
 		return fmt.Errorf("no watched workspaces configured: run 'multica workspace watch <id>' to add one")
 	}
 
 	var registered int
-	for _, ws := range cfg.WatchedWorkspaces {
+	for _, ws := range watched {
 		resp, err := d.registerRuntimesForWorkspace(ctx, ws.ID)
 		if err != nil {
 			d.logger.Error("failed to register runtimes", "workspace_id", ws.ID, "name", ws.Name, "error", err)
@@ -190,9 +223,14 @@ func (d *Daemon) loadWatchedWorkspaces(ctx context.Context) error {
 	}
 
 	if registered == 0 {
-		return fmt.Errorf("failed to register runtimes for any of the %d watched workspace(s)", len(cfg.WatchedWorkspaces))
+		return fmt.Errorf("failed to register runtimes for any of the %d watched workspace(s)", len(watched))
 	}
 	return nil
+}
+
+func localModeEnabled() bool {
+	v := strings.ToLower(strings.TrimSpace(os.Getenv("MULTICA_LOCAL_MODE")))
+	return v == "1" || v == "true" || v == "yes" || v == "on"
 }
 
 // allRuntimeIDs returns all runtime IDs across all watched workspaces.

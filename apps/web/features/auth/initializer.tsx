@@ -15,27 +15,37 @@ const logger = createLogger("auth");
  */
 export function AuthInitializer({ children }: { children: ReactNode }) {
   useEffect(() => {
-    const token = localStorage.getItem("multica_token");
-    if (!token) {
+    const localMode =
+      process.env.NEXT_PUBLIC_LOCAL_MODE === "true" ||
+      process.env.NEXT_PUBLIC_LOCAL_MODE === "1";
+    let token = localStorage.getItem("multica_token");
+    const wsId = localStorage.getItem("multica_workspace_id");
+
+    if (!token && !localMode) {
       clearLoggedInCookie();
       useAuthStore.setState({ isLoading: false });
       return;
     }
 
-    api.setToken(token);
-    const wsId = localStorage.getItem("multica_workspace_id");
+    const initialize = async () => {
+      try {
+        let user;
+        if (!token) {
+          const login = await api.localLogin();
+          token = login.token;
+          user = login.user;
+          localStorage.setItem("multica_token", token);
+          api.setToken(token);
+        } else {
+          api.setToken(token);
+          user = await api.getMe();
+        }
 
-    // Fire getMe and listWorkspaces in parallel
-    const mePromise = api.getMe();
-    const wsPromise = api.listWorkspaces();
-
-    Promise.all([mePromise, wsPromise])
-      .then(([user, wsList]) => {
+        const wsList = await api.listWorkspaces();
         setLoggedInCookie();
         useAuthStore.setState({ user, isLoading: false });
         useWorkspaceStore.getState().hydrateWorkspace(wsList, wsId);
-      })
-      .catch((err) => {
+      } catch (err) {
         logger.error("auth init failed", err);
         api.setToken(null);
         api.setWorkspaceId(null);
@@ -43,7 +53,10 @@ export function AuthInitializer({ children }: { children: ReactNode }) {
         localStorage.removeItem("multica_workspace_id");
         clearLoggedInCookie();
         useAuthStore.setState({ user: null, isLoading: false });
-      });
+      }
+    };
+
+    void initialize();
   }, []);
 
   return <>{children}</>;

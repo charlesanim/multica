@@ -449,7 +449,7 @@ func (h *Handler) FailTask(w http.ResponseWriter, r *http.Request) {
 // ---------------------------------------------------------------------------
 
 type TaskMessageRequest struct {
-	Seq     int            `json:"seq"`
+	Seq     int32          `json:"seq"`
 	Type    string         `json:"type"`
 	Tool    string         `json:"tool,omitempty"`
 	Content string         `json:"content,omitempty"`
@@ -487,6 +487,11 @@ func (h *Handler) ReportTaskMessages(w http.ResponseWriter, r *http.Request) {
 	}
 
 	for _, msg := range req.Messages {
+		if msg.Seq < 0 {
+			writeError(w, http.StatusBadRequest, "invalid message seq")
+			return
+		}
+
 		// Redact sensitive information before persisting or broadcasting.
 		msg.Content = redact.Text(msg.Content)
 		msg.Output = redact.Text(msg.Output)
@@ -498,7 +503,7 @@ func (h *Handler) ReportTaskMessages(w http.ResponseWriter, r *http.Request) {
 		}
 		h.Queries.CreateTaskMessage(r.Context(), db.CreateTaskMessageParams{
 			TaskID:  parseUUID(taskID),
-			Seq:     int32(msg.Seq),
+			Seq:     msg.Seq,
 			Type:    msg.Type,
 			Tool:    pgtype.Text{String: msg.Tool, Valid: msg.Tool != ""},
 			Content: pgtype.Text{String: msg.Content, Valid: msg.Content != ""},
@@ -510,7 +515,7 @@ func (h *Handler) ReportTaskMessages(w http.ResponseWriter, r *http.Request) {
 			h.publish(protocol.EventTaskMessage, workspaceID, "system", "", protocol.TaskMessagePayload{
 				TaskID:  taskID,
 				IssueID: uuidToString(task.IssueID),
-				Seq:     msg.Seq,
+				Seq:     int(msg.Seq),
 				Type:    msg.Type,
 				Tool:    msg.Tool,
 				Content: msg.Content,
@@ -535,8 +540,8 @@ func (h *Handler) ListTaskMessages(w http.ResponseWriter, r *http.Request) {
 
 	var messages []db.TaskMessage
 	if sinceStr := r.URL.Query().Get("since"); sinceStr != "" {
-		sinceSeq, parseErr := strconv.Atoi(sinceStr)
-		if parseErr != nil {
+		sinceSeq, parseErr := strconv.ParseInt(sinceStr, 10, 32)
+		if parseErr != nil || sinceSeq < 0 {
 			writeError(w, http.StatusBadRequest, "invalid since parameter")
 			return
 		}

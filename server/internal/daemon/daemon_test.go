@@ -1,7 +1,9 @@
 package daemon
 
 import (
+	"context"
 	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 )
@@ -81,5 +83,40 @@ func TestIsWorkspaceNotFoundError(t *testing.T) {
 
 	if isWorkspaceNotFoundError(&requestError{StatusCode: http.StatusInternalServerError, Body: `{"error":"workspace not found"}`}) {
 		t.Fatal("did not expect 500 to be treated as workspace not found")
+	}
+}
+
+func TestLocalModeEnabled(t *testing.T) {
+	t.Setenv("MULTICA_LOCAL_MODE", "true")
+	if !localModeEnabled() {
+		t.Fatal("expected localModeEnabled to be true for MULTICA_LOCAL_MODE=true")
+	}
+
+	t.Setenv("MULTICA_LOCAL_MODE", "0")
+	if localModeEnabled() {
+		t.Fatal("expected localModeEnabled to be false for MULTICA_LOCAL_MODE=0")
+	}
+}
+
+func TestClientLocalLogin(t *testing.T) {
+	t.Parallel()
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost || r.URL.Path != "/auth/local-login" {
+			http.NotFound(w, r)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"token":"local-token"}`))
+	}))
+	defer srv.Close()
+
+	c := NewClient(srv.URL)
+	token, err := c.LocalLogin(context.Background())
+	if err != nil {
+		t.Fatalf("LocalLogin returned error: %v", err)
+	}
+	if token != "local-token" {
+		t.Fatalf("expected token local-token, got %q", token)
 	}
 }

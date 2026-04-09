@@ -27,7 +27,8 @@ func main() {
 
 	dbURL := os.Getenv("DATABASE_URL")
 	if dbURL == "" {
-		dbURL = "postgres://multica:multica@localhost:5432/multica?sslmode=disable"
+		slog.Error("DATABASE_URL is required")
+		os.Exit(1)
 	}
 
 	// Connect to database

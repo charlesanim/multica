@@ -5,8 +5,11 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
+	"net/url"
 	"os"
+	"strconv"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -36,6 +39,10 @@ func runRepoCheckout(cmd *cobra.Command, args []string) error {
 	if daemonPort == "" {
 		return fmt.Errorf("MULTICA_DAEMON_PORT not set (this command is intended to be run by an agent inside a daemon task)")
 	}
+	port, err := strconv.Atoi(daemonPort)
+	if err != nil || port < 1 || port > 65535 {
+		return fmt.Errorf("invalid MULTICA_DAEMON_PORT: %q", daemonPort)
+	}
 
 	workspaceID := os.Getenv("MULTICA_WORKSPACE_ID")
 	agentName := os.Getenv("MULTICA_AGENT_NAME")
@@ -60,12 +67,19 @@ func runRepoCheckout(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("encode request: %w", err)
 	}
 
+	endpoint := (&url.URL{
+		Scheme: "http",
+		Host:   net.JoinHostPort("127.0.0.1", strconv.Itoa(port)),
+		Path:   "/repo/checkout",
+	}).String()
+
 	client := &http.Client{Timeout: 5 * time.Minute}
-	resp, err := client.Post(
-		fmt.Sprintf("http://127.0.0.1:%s/repo/checkout", daemonPort),
-		"application/json",
-		bytes.NewReader(data),
-	)
+	req, err := http.NewRequestWithContext(cmd.Context(), http.MethodPost, endpoint, bytes.NewReader(data))
+	if err != nil {
+		return fmt.Errorf("build request: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := client.Do(req)
 	if err != nil {
 		return fmt.Errorf("connect to daemon: %w", err)
 	}

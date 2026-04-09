@@ -29,7 +29,8 @@ func main() {
 
 	dbURL := os.Getenv("DATABASE_URL")
 	if dbURL == "" {
-		dbURL = "postgres://multica:multica@localhost:5432/multica?sslmode=disable"
+		slog.Error("DATABASE_URL is required")
+		os.Exit(1)
 	}
 
 	ctx := context.Background()
@@ -78,7 +79,13 @@ func main() {
 	}
 
 	for _, file := range files {
-		version := extractVersion(file)
+		safeFile, err := validateMigrationPath(migrationsDir, file, suffix)
+		if err != nil {
+			slog.Error("invalid migration file path", "file", file, "error", err)
+			os.Exit(1)
+		}
+
+		version := extractVersion(safeFile)
 
 		if direction == "up" {
 			// Check if already applied
@@ -106,15 +113,15 @@ func main() {
 			}
 		}
 
-		sql, err := os.ReadFile(file)
+		sql, err := os.ReadFile(safeFile) // #nosec G703 -- safeFile is constrained by validateMigrationPath.
 		if err != nil {
-			slog.Error("failed to read migration file", "file", file, "error", err)
+			slog.Error("failed to read migration file", "file", safeFile, "error", err)
 			os.Exit(1)
 		}
 
 		_, err = pool.Exec(ctx, string(sql))
 		if err != nil {
-			slog.Error("failed to run migration", "file", file, "error", err)
+			slog.Error("failed to run migration", "file", safeFile, "error", err)
 			os.Exit(1)
 		}
 
@@ -140,4 +147,21 @@ func extractVersion(filename string) string {
 	base = strings.TrimSuffix(base, ".up.sql")
 	base = strings.TrimSuffix(base, ".down.sql")
 	return base
+}
+
+func validateMigrationPath(migrationsDir, file, suffix string) (string, error) {
+	cleanBase := filepath.Clean(migrationsDir)
+	cleanFile := filepath.Clean(file)
+	if !strings.HasSuffix(cleanFile, suffix) {
+		return "", fmt.Errorf("unexpected migration suffix: %s", cleanFile)
+	}
+
+	rel, err := filepath.Rel(cleanBase, cleanFile)
+	if err != nil {
+		return "", fmt.Errorf("relative path check failed: %w", err)
+	}
+	if rel == "." || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+		return "", fmt.Errorf("migration path escapes base directory: %s", cleanFile)
+	}
+	return cleanFile, nil
 }
