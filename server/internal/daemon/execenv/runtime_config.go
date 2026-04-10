@@ -154,8 +154,8 @@ func buildMetaSkillContent(provider string, ctx TaskContextForEnv) string {
 	b.WriteString("When referencing issues or people in comments, use the mention format so they render as interactive links:\n\n")
 	b.WriteString("- **Issue**: `[MUL-123](mention://issue/<issue-id>)` — renders as a clickable link to the issue\n")
 	b.WriteString("- **Member**: `[@Name](mention://member/<user-id>)` — renders as a styled mention and sends a notification\n")
-	b.WriteString("- **Agent**: `[@Name](mention://agent/<agent-id>)` — renders as a styled mention\n\n")
-	b.WriteString("Use `multica issue list --output json` to look up issue IDs, and `multica workspace members --output json` for member IDs.\n\n")
+	b.WriteString("- **Agent**: `[@Name](mention://agent/<agent-id>)` — renders as a styled mention **and triggers a task for that agent** on the current issue\n\n")
+	b.WriteString("Use `multica agent list --output json` to look up agent IDs, and `multica workspace members --output json` for member IDs.\n\n")
 
 	b.WriteString("## Attachments\n\n")
 	b.WriteString("Issues and comments may include file attachments (images, documents, etc.).\n")
