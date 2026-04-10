@@ -536,3 +536,38 @@ func (q *Queries) UpdateIssueStatus(ctx context.Context, arg UpdateIssueStatusPa
 	)
 	return i, err
 }
+
+const searchIssuesByCommentContent = `-- name: SearchIssuesByCommentContent :many
+SELECT DISTINCT i.id, i.workspace_id, i.title, i.description, i.status, i.priority, i.assignee_type, i.assignee_id, i.creator_type, i.creator_id, i.parent_issue_id, i.acceptance_criteria, i.context_refs, i.position, i.due_date, i.created_at, i.updated_at, i.number, i.project_id FROM issue i
+JOIN comment c ON c.issue_id = i.id
+WHERE i.workspace_id = $1 AND c.content LIKE $2
+ORDER BY i.updated_at DESC
+LIMIT 5
+`
+
+type SearchIssuesByCommentContentParams struct {
+WorkspaceID pgtype.UUID `json:"workspace_id"`
+Content     string      `json:"content"`
+}
+
+func (q *Queries) SearchIssuesByCommentContent(ctx context.Context, workspaceID pgtype.UUID, contentPattern string) ([]Issue, error) {
+rows, err := q.db.Query(ctx, searchIssuesByCommentContent, workspaceID, contentPattern)
+if err != nil {
+return nil, err
+}
+defer rows.Close()
+var items []Issue
+for rows.Next() {
+var i Issue
+if err := rows.Scan(
+&i.ID, &i.WorkspaceID, &i.Title, &i.Description, &i.Status, &i.Priority,
+&i.AssigneeType, &i.AssigneeID, &i.CreatorType, &i.CreatorID,
+&i.ParentIssueID, &i.AcceptanceCriteria, &i.ContextRefs, &i.Position,
+&i.DueDate, &i.CreatedAt, &i.UpdatedAt, &i.Number, &i.ProjectID,
+); err != nil {
+return nil, err
+}
+items = append(items, i)
+}
+return items, nil
+}

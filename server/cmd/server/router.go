@@ -87,6 +87,9 @@ func NewRouter(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus) chi.Route
 	r.Post("/auth/google", h.GoogleLogin)
 	r.Post("/auth/local-login", h.LocalLogin)
 
+	// GitHub webhook (public — uses HMAC signature verification)
+	r.Post("/api/webhooks/github/{workspaceSlug}", h.GitHubWebhook)
+
 	// Daemon API routes (all require a valid token)
 	r.Route("/api/daemon", func(r chi.Router) {
 		r.Use(middleware.Auth(queries))

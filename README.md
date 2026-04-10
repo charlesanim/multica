@@ -69,7 +69,7 @@ docker compose ps                                  # Confirm all services are he
 # MULTICA_LOCAL_MODE=true NEXT_PUBLIC_LOCAL_MODE=true docker compose up --build -d
 ```
 
-See the [Self-Hosting Guide](SELF_HOSTING.md) for full instructions.
+See the [Self-Hosting Guide](SELF_HOSTING.md) for full instructions, or the [Local Development Guide](LOCAL_DEV.md) for running locally with agent orchestration, GitHub webhooks, and Cloudflare Tunnel.
 
 ## CLI
 

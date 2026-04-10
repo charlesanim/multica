@@ -46,6 +46,7 @@ func (q *Queries) CreateWorkspace(ctx context.Context, arg CreateWorkspaceParams
 		&i.Repos,
 		&i.IssuePrefix,
 		&i.IssueCounter,
+		&i.WebhookSecret,
 	)
 	return i, err
 }
@@ -60,7 +61,7 @@ func (q *Queries) DeleteWorkspace(ctx context.Context, id pgtype.UUID) error {
 }
 
 const getWorkspace = `-- name: GetWorkspace :one
-SELECT id, name, slug, description, settings, created_at, updated_at, context, repos, issue_prefix, issue_counter FROM workspace
+SELECT id, name, slug, description, settings, created_at, updated_at, context, repos, issue_prefix, issue_counter, webhook_secret FROM workspace
 WHERE id = $1
 `
 
@@ -79,12 +80,13 @@ func (q *Queries) GetWorkspace(ctx context.Context, id pgtype.UUID) (Workspace, 
 		&i.Repos,
 		&i.IssuePrefix,
 		&i.IssueCounter,
+		&i.WebhookSecret,
 	)
 	return i, err
 }
 
 const getWorkspaceBySlug = `-- name: GetWorkspaceBySlug :one
-SELECT id, name, slug, description, settings, created_at, updated_at, context, repos, issue_prefix, issue_counter FROM workspace
+SELECT id, name, slug, description, settings, created_at, updated_at, context, repos, issue_prefix, issue_counter, webhook_secret FROM workspace
 WHERE slug = $1
 `
 
@@ -103,6 +105,7 @@ func (q *Queries) GetWorkspaceBySlug(ctx context.Context, slug string) (Workspac
 		&i.Repos,
 		&i.IssuePrefix,
 		&i.IssueCounter,
+		&i.WebhookSecret,
 	)
 	return i, err
 }
@@ -121,7 +124,7 @@ func (q *Queries) IncrementIssueCounter(ctx context.Context, id pgtype.UUID) (in
 }
 
 const listWorkspaces = `-- name: ListWorkspaces :many
-SELECT w.id, w.name, w.slug, w.description, w.settings, w.created_at, w.updated_at, w.context, w.repos, w.issue_prefix, w.issue_counter FROM workspace w
+SELECT w.id, w.name, w.slug, w.description, w.settings, w.created_at, w.updated_at, w.context, w.repos, w.issue_prefix, w.issue_counter, webhook_secret FROM workspace w
 JOIN member m ON m.workspace_id = w.id
 WHERE m.user_id = $1
 ORDER BY w.created_at ASC
@@ -148,6 +151,7 @@ func (q *Queries) ListWorkspaces(ctx context.Context, userID pgtype.UUID) ([]Wor
 			&i.Repos,
 			&i.IssuePrefix,
 			&i.IssueCounter,
+		&i.WebhookSecret,
 		); err != nil {
 			return nil, err
 		}
@@ -205,6 +209,7 @@ func (q *Queries) UpdateWorkspace(ctx context.Context, arg UpdateWorkspaceParams
 		&i.Repos,
 		&i.IssuePrefix,
 		&i.IssueCounter,
+		&i.WebhookSecret,
 	)
 	return i, err
 }
