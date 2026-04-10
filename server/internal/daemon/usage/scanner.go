@@ -36,6 +36,9 @@ func (s *Scanner) Scan() []Record {
 	codexRecords := s.scanCodex()
 	records = append(records, codexRecords...)
 
+	copilotRecords := s.scanCopilot()
+	records = append(records, copilotRecords...)
+
 	return records
 }
 

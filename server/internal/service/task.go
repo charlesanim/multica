@@ -397,10 +397,24 @@ func (s *TaskService) updateAgentStatus(ctx context.Context, agentID pgtype.UUID
 }
 
 // LoadAgentSkills loads an agent's skills with their files for task execution.
+// If the agent has no explicitly assigned skills, all workspace skills are loaded
+// so agents can dynamically access the full skill library.
 func (s *TaskService) LoadAgentSkills(ctx context.Context, agentID pgtype.UUID) []AgentSkillData {
 	skills, err := s.Queries.ListAgentSkills(ctx, agentID)
-	if err != nil || len(skills) == 0 {
+	if err != nil {
 		return nil
+	}
+
+	// Fall back to all workspace skills when none are explicitly assigned.
+	if len(skills) == 0 {
+		agent, err := s.Queries.GetAgent(ctx, agentID)
+		if err != nil {
+			return nil
+		}
+		skills, err = s.Queries.ListSkillsByWorkspace(ctx, agent.WorkspaceID)
+		if err != nil || len(skills) == 0 {
+			return nil
+		}
 	}
 
 	result := make([]AgentSkillData, 0, len(skills))
