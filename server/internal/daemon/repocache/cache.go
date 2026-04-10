@@ -44,6 +44,11 @@ func New(root string, logger *slog.Logger) *Cache {
 	return &Cache{root: root, logger: logger}
 }
 
+// Root returns the base directory for all caches.
+func (c *Cache) Root() string {
+	return c.root
+}
+
 // lockForRepo returns the mutex dedicated to the given bare repo path. See
 // the Cache.repoLocks field comment for semantics.
 func (c *Cache) lockForRepo(barePath string) *sync.Mutex {
