@@ -81,3 +81,10 @@ WHERE parent_issue_id = $1
 ORDER BY position ASC, created_at DESC;
 
 -- SearchIssues: moved to handler (dynamic SQL for multi-word search support).
+
+-- name: SearchIssuesByCommentContent :many
+SELECT DISTINCT i.* FROM issue i
+JOIN comment c ON c.issue_id = i.id
+WHERE i.workspace_id = $1 AND c.content LIKE $2
+ORDER BY i.updated_at DESC
+LIMIT 5;
