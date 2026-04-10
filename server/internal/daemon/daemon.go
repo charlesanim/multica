@@ -218,6 +218,9 @@ func (d *Daemon) loadWatchedWorkspaces(ctx context.Context) error {
 			}
 		}
 
+		// Sync local skills from ~/.agents/skills/ into the workspace.
+		d.syncLocalSkills(ctx, ws.ID)
+
 		d.logger.Info("watching workspace", "workspace_id", ws.ID, "name", ws.Name, "runtimes", len(resp.Runtimes), "repos", len(resp.Repos))
 		registered++
 	}
