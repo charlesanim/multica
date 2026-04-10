@@ -119,13 +119,15 @@ func buildMetaSkillContent(provider string, ctx TaskContextForEnv) string {
 			b.WriteString("   c. Implement the changes and commit\n")
 			b.WriteString("   d. Push the branch to the remote\n")
 			b.WriteString("   e. Create a pull request (decide the target branch based on the repo's conventions)\n")
-			fmt.Fprintf(&b, "   f. Post the PR link as a comment: `multica issue comment add %s --content \"PR: <url>\"`\n", ctx.IssueID)
+			fmt.Fprintf(&b, "   f. Add labels to the PR: `gh pr edit <number> --add-label multica --add-label %s`\n", ctx.AgentName)
+			fmt.Fprintf(&b, "   g. Post the PR link as a comment: `multica issue comment add %s --content \"PR: <url>\"`\n", ctx.IssueID)
 		} else {
 			b.WriteString("   a. Create a new branch\n")
 			b.WriteString("   b. Implement the changes and commit\n")
 			b.WriteString("   c. Push the branch to the remote\n")
 			b.WriteString("   d. Create a pull request (decide the target branch based on the repo's conventions)\n")
-			fmt.Fprintf(&b, "   e. Post the PR link as a comment: `multica issue comment add %s --content \"PR: <url>\"`\n", ctx.IssueID)
+			fmt.Fprintf(&b, "   e. Add labels to the PR: `gh pr edit <number> --add-label multica --add-label %s`\n", ctx.AgentName)
+			fmt.Fprintf(&b, "   f. Post the PR link as a comment: `multica issue comment add %s --content \"PR: <url>\"`\n", ctx.IssueID)
 		}
 		b.WriteString("5. If the task does not require code (e.g. research, documentation), post your findings as a comment\n")
 		fmt.Fprintf(&b, "6. Run `multica issue status %s in_review`\n", ctx.IssueID)

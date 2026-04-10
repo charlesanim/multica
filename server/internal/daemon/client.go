@@ -232,6 +232,27 @@ func (c *Client) Register(ctx context.Context, req map[string]any) (*RegisterRes
 	return &resp, nil
 }
 
+// SkillInfo holds minimal skill data for dedup during sync.
+type SkillInfo struct {
+	ID   string `json:"id"`
+	Name string `json:"name"`
+}
+
+// ListSkills returns all skills in the workspace.
+func (c *Client) ListSkills(ctx context.Context, workspaceID string) ([]SkillInfo, error) {
+	var skills []SkillInfo
+	if err := c.getJSON(ctx, "/api/skills?workspace_id="+workspaceID, &skills); err != nil {
+		return nil, err
+	}
+	return skills, nil
+}
+
+// CreateSkill creates a new workspace skill.
+func (c *Client) CreateSkill(ctx context.Context, workspaceID string, data map[string]any) error {
+	data["workspace_id"] = workspaceID
+	return c.postJSON(ctx, "/api/skills?workspace_id="+workspaceID, data, nil)
+}
+
 func (c *Client) postJSON(ctx context.Context, path string, reqBody any, respBody any) error {
 	var body io.Reader
 	if reqBody != nil {
