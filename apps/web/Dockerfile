@@ -10,11 +10,16 @@ WORKDIR /app
 
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
 COPY apps/web/package.json ./apps/web/package.json
+COPY packages/core/package.json ./packages/core/package.json
+COPY packages/ui/package.json ./packages/ui/package.json
+COPY packages/tsconfig/package.json ./packages/tsconfig/package.json
+COPY packages/views/package.json ./packages/views/package.json
 RUN pnpm install --frozen-lockfile --filter @multica/web...
 
 FROM deps AS build
 WORKDIR /app
 COPY apps/web ./apps/web
+COPY packages ./packages
 
 ARG REMOTE_API_URL=http://backend:8080
 ARG NEXT_PUBLIC_API_URL=

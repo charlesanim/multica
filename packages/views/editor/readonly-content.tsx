@@ -89,10 +89,8 @@ const components: Partial<Components> = {
     return (
       <a
         href={href}
-        onClick={(e) => {
-          e.preventDefault();
-          if (href) window.open(href, "_blank", "noopener,noreferrer");
-        }}
+        target="_blank"
+        rel="noopener noreferrer"
       >
         {children}
       </a>

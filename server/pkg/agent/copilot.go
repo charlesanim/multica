@@ -81,6 +81,7 @@ func (b *copilotBackend) Execute(ctx context.Context, prompt string, opts ExecOp
 		finalStatus := "completed"
 		var finalError string
 		var totalOutputTokens int64
+		var totalInputTokens int64
 
 		scanner := bufio.NewScanner(stdout)
 		scanner.Buffer(make([]byte, 0, 1024*1024), 10*1024*1024)
@@ -114,14 +115,26 @@ func (b *copilotBackend) Execute(ctx context.Context, prompt string, opts ExecOp
 				if tokens, ok := evt.Data["outputTokens"].(float64); ok {
 					totalOutputTokens += int64(tokens)
 				}
+				if tokens, ok := evt.Data["inputTokens"].(float64); ok {
+					totalInputTokens += int64(tokens)
+				}
 				// Handle tool requests within the message
-				if toolReqs, ok := evt.Data["toolRequests"].([]any); ok {
+			if toolReqs, ok := evt.Data["toolRequests"].([]any); ok {
 					for _, tr := range toolReqs {
 						if trMap, ok := tr.(map[string]any); ok {
-							toolName, _ := trMap["toolName"].(string)
-							callID, _ := trMap["id"].(string)
+							// Copilot CLI uses "name" and "toolCallId" (not "toolName"/"id")
+							toolName, _ := trMap["name"].(string)
+							if toolName == "" {
+								toolName, _ = trMap["toolName"].(string)
+							}
+							callID, _ := trMap["toolCallId"].(string)
+							if callID == "" {
+								callID, _ = trMap["id"].(string)
+							}
 							var input map[string]any
-							if inp, ok := trMap["input"].(map[string]any); ok {
+							if inp, ok := trMap["arguments"].(map[string]any); ok {
+								input = inp
+							} else if inp, ok := trMap["input"].(map[string]any); ok {
 								input = inp
 							}
 							trySend(msgCh, Message{
@@ -142,6 +155,18 @@ func (b *copilotBackend) Execute(ctx context.Context, prompt string, opts ExecOp
 						data, _ := json.Marshal(raw)
 						toolOutput = string(data)
 					}
+				}
+				trySend(msgCh, Message{
+					Type:   MessageToolResult,
+					CallID: callID,
+					Output: toolOutput,
+				})
+
+			case "tool.execution_complete":
+				callID, _ := evt.Data["toolCallId"].(string)
+				var toolOutput string
+				if result, ok := evt.Data["result"].(map[string]any); ok {
+					toolOutput, _ = result["content"].(string)
 				}
 				trySend(msgCh, Message{
 					Type:   MessageToolResult,
@@ -178,7 +203,7 @@ func (b *copilotBackend) Execute(ctx context.Context, prompt string, opts ExecOp
 		b.cfg.Logger.Info("copilot finished", "pid", cmd.Process.Pid, "status", finalStatus, "duration", duration.Round(time.Millisecond).String())
 
 		var usage map[string]TokenUsage
-		if totalOutputTokens > 0 {
+		if totalOutputTokens > 0 || totalInputTokens > 0 {
 			m := model
 			if m == "" {
 				m = opts.Model
@@ -186,7 +211,7 @@ func (b *copilotBackend) Execute(ctx context.Context, prompt string, opts ExecOp
 			if m == "" {
 				m = "unknown"
 			}
-			usage = map[string]TokenUsage{m: {OutputTokens: totalOutputTokens}}
+			usage = map[string]TokenUsage{m: {InputTokens: totalInputTokens, OutputTokens: totalOutputTokens}}
 		}
 
 		resCh <- Result{

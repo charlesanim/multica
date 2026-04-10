@@ -97,6 +97,29 @@ const taskStatusConfig: Record<string, { label: string; icon: typeof CheckCircle
   cancelled: { label: "Cancelled", icon: XCircle, color: "text-muted-foreground" },
 };
 
+const AVAILABLE_MODELS: { id: string; label: string; tier: string }[] = [
+  { id: "claude-sonnet-4.6", label: "Claude Sonnet 4.6", tier: "standard" },
+  { id: "claude-sonnet-4.5", label: "Claude Sonnet 4.5", tier: "standard" },
+  { id: "claude-haiku-4.5", label: "Claude Haiku 4.5", tier: "fast" },
+  { id: "claude-opus-4.6", label: "Claude Opus 4.6", tier: "premium" },
+  { id: "claude-opus-4.5", label: "Claude Opus 4.5", tier: "premium" },
+  { id: "claude-sonnet-4", label: "Claude Sonnet 4", tier: "standard" },
+  { id: "gpt-5.4", label: "GPT-5.4", tier: "standard" },
+  { id: "gpt-5.3-codex", label: "GPT-5.3 Codex", tier: "standard" },
+  { id: "gpt-5.2-codex", label: "GPT-5.2 Codex", tier: "standard" },
+  { id: "gpt-5.2", label: "GPT-5.2", tier: "standard" },
+  { id: "gpt-5.1", label: "GPT-5.1", tier: "standard" },
+  { id: "gpt-5.4-mini", label: "GPT-5.4 Mini", tier: "fast" },
+  { id: "gpt-5-mini", label: "GPT-5 Mini", tier: "fast" },
+  { id: "gpt-4.1", label: "GPT-4.1", tier: "fast" },
+];
+
+const MODEL_TIER_COLORS: Record<string, string> = {
+  premium: "bg-amber-500/10 text-amber-600",
+  standard: "bg-info/10 text-info",
+  fast: "bg-emerald-500/10 text-emerald-600",
+};
+
 
 function generateId(): string {
   return `${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
@@ -736,6 +759,7 @@ function SettingsTab({
   const [runtimeId, setRuntimeId] = useState(agent.runtime_id);
   const [model, setModel] = useState(agent.model ?? "");
   const [runtimeOpen, setRuntimeOpen] = useState(false);
+  const [modelOpen, setModelOpen] = useState(false);
   const [saving, setSaving] = useState(false);
   const { upload, uploading } = useFileUpload(api);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -935,14 +959,40 @@ function SettingsTab({
 
       <div>
         <Label className="text-xs text-muted-foreground">Model</Label>
-        <Input
-          value={model}
-          onChange={(e) => setModel(e.target.value)}
-          placeholder="e.g. claude-sonnet-4-5, o3, gpt-4.1 (leave empty for runtime default)"
-          className="mt-1"
-        />
+        <Popover open={modelOpen} onOpenChange={setModelOpen}>
+          <PopoverTrigger
+            className="mt-1 flex w-full items-center justify-between rounded-lg border px-3 py-2.5 text-sm transition-colors hover:bg-muted"
+          >
+            <span className={model ? "" : "text-muted-foreground"}>
+              {model ? (AVAILABLE_MODELS.find((m) => m.id === model)?.label ?? model) : "Runtime default"}
+            </span>
+            <ChevronDown className="h-4 w-4 text-muted-foreground" />
+          </PopoverTrigger>
+          <PopoverContent className="w-[var(--radix-popover-trigger-width)] p-1 max-h-72 overflow-y-auto" align="start">
+            <button
+              type="button"
+              onClick={() => { setModel(""); setModelOpen(false); }}
+              className={`flex w-full items-center gap-2 rounded-md px-2 py-2 text-sm transition-colors hover:bg-muted ${!model ? "bg-muted" : ""}`}
+            >
+              <span className="flex-1 text-left text-muted-foreground">Runtime default</span>
+            </button>
+            {AVAILABLE_MODELS.map((m) => (
+              <button
+                key={m.id}
+                type="button"
+                onClick={() => { setModel(m.id); setModelOpen(false); }}
+                className={`flex w-full items-center gap-2 rounded-md px-2 py-2 text-sm transition-colors hover:bg-muted ${m.id === model ? "bg-muted" : ""}`}
+              >
+                <span className="flex-1 text-left font-medium">{m.label}</span>
+                <span className={`shrink-0 rounded px-1.5 py-0.5 text-xs font-medium ${MODEL_TIER_COLORS[m.tier] ?? ""}`}>
+                  {m.tier}
+                </span>
+              </button>
+            ))}
+          </PopoverContent>
+        </Popover>
         <p className="mt-1 text-xs text-muted-foreground">
-          Override the default model for this agent&apos;s runtime. Leave empty to use the runtime default.
+          Override the default model for this agent&apos;s runtime.
         </p>
       </div>
 
