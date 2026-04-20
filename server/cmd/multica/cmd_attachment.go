@@ -30,10 +30,26 @@ var attachmentDownloadCmd = &cobra.Command{
 	RunE:  runAttachmentDownload,
 }
 
+var attachmentUploadCmd = &cobra.Command{
+	Use:   "upload <file-path>",
+	Short: "Upload a file as an attachment",
+	Long:  "Upload a local file and optionally link it to an issue. Returns attachment metadata as JSON.",
+	Example: `  # Upload a screenshot and link to an issue
+  $ multica attachment upload screenshot.png --issue abc123
+
+  # Upload without linking (returns attachment ID for later use)
+  $ multica attachment upload diagram.png`,
+	Args: exactArgs(1),
+	RunE: runAttachmentUpload,
+}
+
 func init() {
 	attachmentCmd.AddCommand(attachmentDownloadCmd)
+	attachmentCmd.AddCommand(attachmentUploadCmd)
 
 	attachmentDownloadCmd.Flags().StringP("output-dir", "o", ".", "Directory to save the downloaded file")
+
+	attachmentUploadCmd.Flags().String("issue", "", "Issue ID to link the attachment to")
 }
 
 func runAttachmentDownload(cmd *cobra.Command, args []string) error {
@@ -88,5 +104,37 @@ func runAttachmentDownload(cmd *cobra.Command, args []string) error {
 		"filename": filename,
 		"path":     abs,
 		"size":     strVal(att, "size_bytes"),
+	})
+}
+
+func runAttachmentUpload(cmd *cobra.Command, args []string) error {
+	filePath := args[0]
+	issueID, _ := cmd.Flags().GetString("issue")
+
+	data, err := os.ReadFile(filePath)
+	if err != nil {
+		return fmt.Errorf("read file: %w", err)
+	}
+
+	client, err := newAPIClient(cmd)
+	if err != nil {
+		return err
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 120*time.Second)
+	defer cancel()
+
+	attachmentID, err := client.UploadFile(ctx, data, filePath, issueID)
+	if err != nil {
+		return fmt.Errorf("upload file: %w", err)
+	}
+
+	filename := filepath.Base(filePath)
+	fmt.Fprintf(os.Stderr, "Uploaded: %s (id: %s)\n", filename, attachmentID)
+
+	return cli.PrintJSON(os.Stdout, map[string]any{
+		"id":       attachmentID,
+		"filename": filename,
+		"issue_id": issueID,
 	})
 }

@@ -91,7 +91,8 @@ func buildMetaSkillContent(provider string, ctx TaskContextForEnv) string {
 	b.WriteString("- `multica autopilot create --title \"...\" --agent <name> --mode create_issue [--description \"...\"]` — Create an autopilot\n")
 	b.WriteString("- `multica autopilot update <id> [--title X] [--description X] [--status active|paused]` — Update an autopilot\n")
 	b.WriteString("- `multica autopilot trigger <id>` — Manually trigger an autopilot to run once\n")
-	b.WriteString("- `multica autopilot delete <id>` — Delete an autopilot\n\n")
+	b.WriteString("- `multica autopilot delete <id>` — Delete an autopilot\n")
+	b.WriteString("- `multica attachment upload <file-path> [--issue <id>]` — Upload a file (screenshot, video, etc.) as an attachment\n\n")
 
 	// Inject available repositories section.
 	if len(ctx.Repos) > 0 {
@@ -180,6 +181,32 @@ func buildMetaSkillContent(provider string, ctx TaskContextForEnv) string {
 	b.WriteString("```\nmultica attachment download <attachment-id>\n```\n\n")
 	b.WriteString("This downloads the file to the current directory and prints the local path. Use `-o <dir>` to save elsewhere.\n")
 	b.WriteString("After downloading, you can read the file directly (e.g. view an image, read a document).\n\n")
+	b.WriteString("To upload a file as an attachment (screenshots, videos, etc.):\n\n")
+	b.WriteString("```\nmultica attachment upload <file-path> --issue <issue-id>\n```\n\n")
+	b.WriteString("You can also attach files inline when creating comments:\n\n")
+	b.WriteString("```\nmultica issue comment add <issue-id> --content \"...\" --attachment screenshot.png\n```\n\n")
+
+	// Add visual validation section when browser automation is confirmed available.
+	if ctx.BrowserAvailable {
+		b.WriteString("## Visual Validation\n\n")
+		b.WriteString("You have browser automation available via the `agent-browser` CLI. ")
+		b.WriteString("**For any changes that touch UI files (`.tsx`, `.css`, or any user-facing code), you MUST visually validate your changes.**\n\n")
+		b.WriteString("### Validation workflow\n\n")
+		b.WriteString("1. **Start the dev server** in the background:\n")
+		b.WriteString("   ```bash\n   pnpm dev:web &\n   DEV_PID=$!\n   sleep 10\n   ```\n")
+		b.WriteString("2. **Open the affected page** and verify it renders correctly:\n")
+		b.WriteString("   ```bash\n   agent-browser open http://localhost:3000/<path>\n   agent-browser wait --load networkidle\n   agent-browser snapshot -i\n   ```\n")
+		b.WriteString("3. **Walk through the changed UI flow** — interact with elements using refs from snapshot:\n")
+		b.WriteString("   ```bash\n   agent-browser click @e1\n   agent-browser fill @e2 \"test input\"\n   agent-browser wait --load networkidle\n   ```\n")
+		b.WriteString("4. **Capture screenshot evidence** at each key step:\n")
+		b.WriteString("   ```bash\n   agent-browser screenshot --full step1.png\n   ```\n")
+		b.WriteString("5. **Upload evidence** to the issue:\n")
+		b.WriteString("   ```bash\n   multica attachment upload step1.png --issue <issue-id>\n   ```\n")
+		b.WriteString("6. **Clean up** when done:\n")
+		b.WriteString("   ```bash\n   agent-browser close\n   kill $DEV_PID 2>/dev/null\n   ```\n\n")
+		b.WriteString("Always re-snapshot after navigation or DOM changes — refs (`@e1`, `@e2`) are invalidated when the page changes.\n\n")
+		b.WriteString("**Skip visual validation** only for pure backend changes, config changes, or non-visual refactors.\n\n")
+	}
 
 	b.WriteString("## Important: Always Use the `multica` CLI\n\n")
 	b.WriteString("All interactions with Multica platform resources — including issues, comments, attachments, images, files, and any other platform data — **must** go through the `multica` CLI. ")

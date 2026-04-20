@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"time"
 )
@@ -39,12 +40,14 @@ type TaskContextForEnv struct {
 	AgentSkills       []SkillContextForEnv
 	Repos             []RepoContextForEnv // workspace repos available for checkout
 	ChatSessionID     string              // non-empty for chat tasks
+	BrowserAvailable  bool                // true when agent-browser CLI is confirmed available
 }
 
 // SkillContextForEnv represents a skill to be written into the execution environment.
 type SkillContextForEnv struct {
 	Name    string
 	Content string
+	Config  map[string]any
 	Files   []SkillFileContextForEnv
 }
 
@@ -62,6 +65,10 @@ type Environment struct {
 	WorkDir string
 	// CodexHome is the path to the per-task CODEX_HOME directory (set only for codex provider).
 	CodexHome string
+	// BrowserAvailable indicates that agent-browser CLI is available for this env.
+	BrowserAvailable bool
+	// BrowserPathPrefix is prepended to PATH when agent-browser was locally installed (empty if global).
+	BrowserPathPrefix string
 
 	logger *slog.Logger // for cleanup logging
 }
@@ -103,6 +110,15 @@ func Prepare(params PrepareParams, logger *slog.Logger) (*Environment, error) {
 		logger:  logger,
 	}
 
+	// Install agent-browser CLI if any skill requires it (before writing
+	// context files so the meta skill content can reflect availability).
+	if skillsRequireBrowser(params.Task.AgentSkills) {
+		pathPrefix, available := ensureAgentBrowser(envRoot, logger)
+		env.BrowserAvailable = available
+		env.BrowserPathPrefix = pathPrefix
+		params.Task.BrowserAvailable = available
+	}
+
 	// Write context files into workdir (skills go to provider-native paths).
 	if err := writeContextFiles(workDir, params.Provider, params.Task); err != nil {
 		return nil, fmt.Errorf("execenv: write context files: %w", err)
@@ -141,6 +157,14 @@ func Reuse(workDir, provider, codexVersion string, task TaskContextForEnv, logge
 		RootDir: filepath.Dir(workDir),
 		WorkDir: workDir,
 		logger:  logger,
+	}
+
+	// Ensure agent-browser is available if skills require it.
+	if skillsRequireBrowser(task.AgentSkills) {
+		pathPrefix, available := ensureAgentBrowser(env.RootDir, logger)
+		env.BrowserAvailable = available
+		env.BrowserPathPrefix = pathPrefix
+		task.BrowserAvailable = available
 	}
 
 	// Refresh context files (issue_context.md, skills).
@@ -226,4 +250,50 @@ func (env *Environment) Cleanup(removeAll bool) error {
 		return err
 	}
 	return nil
+}
+
+// skillsRequireBrowser checks if any skill has requires_browser set in its config.
+func skillsRequireBrowser(skills []SkillContextForEnv) bool {
+	for _, s := range skills {
+		if v, ok := s.Config["requires_browser"]; ok {
+			if b, isBool := v.(bool); isBool && b {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// ensureAgentBrowser ensures the agent-browser CLI is available in the given
+// environment. It first checks if agent-browser is already on PATH. If not,
+// installs it to a local prefix inside the environment root and returns the
+// PATH prefix to prepend. Returns true if agent-browser is available.
+func ensureAgentBrowser(envRoot string, logger *slog.Logger) (pathPrefix string, ok bool) {
+	// Check if already available on PATH.
+	if _, err := exec.LookPath("agent-browser"); err == nil {
+		logger.Info("execenv: agent-browser already available on PATH")
+		return "", true
+	}
+
+	// Install to a local prefix inside the env root (not global).
+	localPrefix := filepath.Join(envRoot, ".agent-tools")
+	if err := os.MkdirAll(localPrefix, 0o755); err != nil {
+		logger.Warn("execenv: failed to create agent-tools dir", "error", err)
+		return "", false
+	}
+
+	logger.Info("execenv: installing agent-browser to local prefix", "prefix", localPrefix)
+	cmd := exec.Command("npm", "install", "--prefix", localPrefix, "agent-browser")
+	cmd.Dir = envRoot
+	cmd.Stdout = nil
+	cmd.Stderr = nil
+
+	if err := cmd.Run(); err != nil {
+		logger.Warn("execenv: failed to install agent-browser (non-fatal)", "error", err)
+		return "", false
+	}
+
+	binPath := filepath.Join(localPrefix, "node_modules", ".bin")
+	logger.Info("execenv: agent-browser installed successfully", "bin", binPath)
+	return binPath, true
 }

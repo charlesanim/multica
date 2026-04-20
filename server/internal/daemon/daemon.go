@@ -997,6 +997,10 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, taskLo
 	if env.CodexHome != "" {
 		agentEnv["CODEX_HOME"] = env.CodexHome
 	}
+	// Prepend locally-installed agent-browser to PATH so the agent can find it.
+	if env.BrowserPathPrefix != "" {
+		agentEnv["PATH"] = env.BrowserPathPrefix + string(os.PathListSeparator) + agentEnv["PATH"]
+	}
 	// Inject user-configured custom environment variables (e.g. ANTHROPIC_API_KEY,
 	// ANTHROPIC_BASE_URL for router/proxy mode, or CLAUDE_CODE_USE_BEDROCK for
 	// Bedrock). These are set per-agent via the agent settings UI.
@@ -1356,6 +1360,7 @@ func convertSkillsForEnv(skills []SkillData) []execenv.SkillContextForEnv {
 		result[i] = execenv.SkillContextForEnv{
 			Name:    s.Name,
 			Content: s.Content,
+			Config:  s.Config,
 		}
 		for _, f := range s.Files {
 			result[i].Files = append(result[i].Files, execenv.SkillFileContextForEnv{

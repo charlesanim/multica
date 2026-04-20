@@ -56,6 +56,7 @@ type AgentData struct {
 type SkillData struct {
 	Name    string          `json:"name"`
 	Content string          `json:"content"`
+	Config  map[string]any  `json:"config,omitempty"`
 	Files   []SkillFileData `json:"files,omitempty"`
 }
 

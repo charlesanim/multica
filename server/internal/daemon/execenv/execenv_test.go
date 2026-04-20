@@ -1225,3 +1225,155 @@ func TestReadGCMeta_NoFile(t *testing.T) {
 		t.Fatal("expected error for missing file")
 	}
 }
+
+func TestSkillsRequireBrowser(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name   string
+		skills []SkillContextForEnv
+		want   bool
+	}{
+		{
+			name:   "no skills",
+			skills: nil,
+			want:   false,
+		},
+		{
+			name: "skill without config",
+			skills: []SkillContextForEnv{
+				{Name: "test", Content: "content"},
+			},
+			want: false,
+		},
+		{
+			name: "skill with requires_browser true",
+			skills: []SkillContextForEnv{
+				{Name: "browser", Content: "content", Config: map[string]any{"requires_browser": true}},
+			},
+			want: true,
+		},
+		{
+			name: "skill with requires_browser false",
+			skills: []SkillContextForEnv{
+				{Name: "browser", Content: "content", Config: map[string]any{"requires_browser": false}},
+			},
+			want: false,
+		},
+		{
+			name: "mixed skills one requires browser",
+			skills: []SkillContextForEnv{
+				{Name: "coding", Content: "code stuff"},
+				{Name: "browser", Content: "browse stuff", Config: map[string]any{"requires_browser": true}},
+			},
+			want: true,
+		},
+		{
+			name: "config with non-bool value",
+			skills: []SkillContextForEnv{
+				{Name: "browser", Content: "content", Config: map[string]any{"requires_browser": "yes"}},
+			},
+			want: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			if got := skillsRequireBrowser(tt.skills); got != tt.want {
+				t.Errorf("skillsRequireBrowser() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestInjectRuntimeConfigVisualValidation(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+
+	ctx := TaskContextForEnv{
+		IssueID:          "test-issue-id",
+		BrowserAvailable: true,
+		AgentSkills: []SkillContextForEnv{
+			{Name: "agent-browser", Content: "Browser automation.", Config: map[string]any{"requires_browser": true}},
+		},
+	}
+
+	if err := InjectRuntimeConfig(dir, "claude", ctx); err != nil {
+		t.Fatalf("InjectRuntimeConfig failed: %v", err)
+	}
+
+	content, err := os.ReadFile(filepath.Join(dir, "CLAUDE.md"))
+	if err != nil {
+		t.Fatalf("failed to read CLAUDE.md: %v", err)
+	}
+
+	s := string(content)
+	for _, want := range []string{
+		"Visual Validation",
+		"agent-browser open",
+		"agent-browser snapshot",
+		"agent-browser screenshot",
+		"multica attachment upload",
+		"DEV_PID=$!",
+	} {
+		if !strings.Contains(s, want) {
+			t.Errorf("CLAUDE.md missing %q", want)
+		}
+	}
+}
+
+func TestInjectRuntimeConfigNoVisualValidationWithoutBrowser(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+
+	ctx := TaskContextForEnv{
+		IssueID:          "test-issue-id",
+		BrowserAvailable: false,
+		AgentSkills: []SkillContextForEnv{
+			{Name: "agent-browser", Content: "Browser automation.", Config: map[string]any{"requires_browser": true}},
+		},
+	}
+
+	if err := InjectRuntimeConfig(dir, "claude", ctx); err != nil {
+		t.Fatalf("InjectRuntimeConfig failed: %v", err)
+	}
+
+	content, err := os.ReadFile(filepath.Join(dir, "CLAUDE.md"))
+	if err != nil {
+		t.Fatalf("failed to read CLAUDE.md: %v", err)
+	}
+
+	s := string(content)
+	if strings.Contains(s, "Visual Validation") {
+		t.Error("CLAUDE.md should NOT contain Visual Validation when BrowserAvailable is false")
+	}
+}
+
+func TestAttachmentUploadDocsInRuntimeConfig(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+
+	ctx := TaskContextForEnv{
+		IssueID: "test-issue-id",
+	}
+
+	if err := InjectRuntimeConfig(dir, "claude", ctx); err != nil {
+		t.Fatalf("InjectRuntimeConfig failed: %v", err)
+	}
+
+	content, err := os.ReadFile(filepath.Join(dir, "CLAUDE.md"))
+	if err != nil {
+		t.Fatalf("failed to read CLAUDE.md: %v", err)
+	}
+
+	s := string(content)
+	for _, want := range []string{
+		"multica attachment upload",
+		"multica attachment download",
+	} {
+		if !strings.Contains(s, want) {
+			t.Errorf("CLAUDE.md missing %q", want)
+		}
+	}
+}

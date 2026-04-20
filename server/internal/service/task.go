@@ -442,7 +442,13 @@ func (s *TaskService) LoadAgentSkills(ctx context.Context, agentID pgtype.UUID) 
 
 	result := make([]AgentSkillData, 0, len(skills))
 	for _, sk := range skills {
-		data := AgentSkillData{Name: sk.Name, Content: sk.Content}
+		var config map[string]any
+		if sk.Config != nil {
+			if err := json.Unmarshal(sk.Config, &config); err != nil {
+				slog.Warn("failed to unmarshal skill config", "skill", sk.Name, "error", err)
+			}
+		}
+		data := AgentSkillData{Name: sk.Name, Content: sk.Content, Config: config}
 		files, _ := s.Queries.ListSkillFiles(ctx, sk.ID)
 		for _, f := range files {
 			data.Files = append(data.Files, AgentSkillFileData{Path: f.Path, Content: f.Content})
@@ -456,6 +462,7 @@ func (s *TaskService) LoadAgentSkills(ctx context.Context, agentID pgtype.UUID) 
 type AgentSkillData struct {
 	Name    string               `json:"name"`
 	Content string               `json:"content"`
+	Config  map[string]any       `json:"config,omitempty"`
 	Files   []AgentSkillFileData `json:"files,omitempty"`
 }
 
