@@ -6,9 +6,12 @@
 #   2. Add to your .env:
 #        TS_AUTHKEY=tskey-auth-...
 #        TS_HOSTNAME=hub           # pick any name — this is how it appears on your tailnet
-#   3. Start:
+#   3. (Optional) To advertise Tailscale tags, first define them in your ACL policy
+#      (https://login.tailscale.com/admin/acls), then set in .env:
+#        TS_EXTRA_ARGS=--advertise-tags=tag:container
+#   4. Start:
 #        docker compose -f docker-compose.yml -f docker-compose.tailscale.yml up -d
-#   4. Access from any Tailscale device:
+#   5. Access from any Tailscale device:
 #        https://<TS_HOSTNAME>.<tailnet>.ts.net  (HTTPS, auto-cert via Tailscale Serve)
 #
 # Security:
@@ -25,7 +28,7 @@ services:
       TS_STATE_DIR: /var/lib/tailscale
       TS_USERSPACE: "false"
       TS_SERVE_CONFIG: /config/serve.json
-      TS_EXTRA_ARGS: --advertise-tags=tag:container
+      TS_EXTRA_ARGS: ${TS_EXTRA_ARGS:-}
     volumes:
       - tailscale-state:/var/lib/tailscale
       - ./docker/tailscale-serve.json:/config/serve.json:ro
@@ -51,10 +54,10 @@ services:
       JWT_SECRET: ${JWT_SECRET}
       MULTICA_LOCAL_MODE: ${MULTICA_LOCAL_MODE:-false}
       MULTICA_LOCAL_EMAIL: ${MULTICA_LOCAL_EMAIL:-local@localhost}
-      FRONTEND_ORIGIN: https://${TS_HOSTNAME:-hub}.${TS_TAILNET:-tail8d788f.ts.net}
-      CORS_ALLOWED_ORIGINS: https://${TS_HOSTNAME:-hub}.${TS_TAILNET:-tail8d788f.ts.net}
-      MULTICA_APP_URL: https://${TS_HOSTNAME:-hub}.${TS_TAILNET:-tail8d788f.ts.net}
-      MULTICA_SERVER_URL: wss://${TS_HOSTNAME:-hub}.${TS_TAILNET:-tail8d788f.ts.net}/ws
+      FRONTEND_ORIGIN: ${TS_SCHEME:-https}://${TS_HOSTNAME:-hub}.${TS_TAILNET:-tail8d788f.ts.net}
+      CORS_ALLOWED_ORIGINS: ${TS_SCHEME:-https}://${TS_HOSTNAME:-hub}.${TS_TAILNET:-tail8d788f.ts.net}
+      MULTICA_APP_URL: ${TS_SCHEME:-https}://${TS_HOSTNAME:-hub}.${TS_TAILNET:-tail8d788f.ts.net}
+      MULTICA_SERVER_URL: ${TS_WS_SCHEME:-wss}://${TS_HOSTNAME:-hub}.${TS_TAILNET:-tail8d788f.ts.net}/ws
     healthcheck:
       test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:4900/health || exit 1"]
       interval: 5s
