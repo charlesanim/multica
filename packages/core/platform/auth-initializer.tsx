@@ -53,6 +53,25 @@ export function AuthInitializer({
           qc.setQueryData(workspaceKeys.list(), wsList);
         })
         .catch((err) => {
+          // In local mode, fall back to local-login when cookie auth fails
+          if (localMode) {
+            api.localLogin()
+              .then(({ token: newToken, user }) => {
+                storage.setItem("multica_token", newToken);
+                api.setToken(newToken);
+                return api.listWorkspaces().then((wsList) => {
+                  onLogin?.();
+                  useAuthStore.setState({ user, isLoading: false });
+                  qc.setQueryData(workspaceKeys.list(), wsList);
+                });
+              })
+              .catch((localErr) => {
+                logger.error("local mode cookie auth fallback failed", localErr);
+                onLogout?.();
+                useAuthStore.setState({ user: null, isLoading: false });
+              });
+            return;
+          }
           logger.error("cookie auth init failed", err);
           onLogout?.();
           useAuthStore.setState({ user: null, isLoading: false });
