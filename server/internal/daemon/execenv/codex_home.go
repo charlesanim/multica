@@ -8,6 +8,13 @@ import (
 	"path/filepath"
 )
 
+// Directories to symlink from the shared ~/.codex/ into the per-task CODEX_HOME.
+// The shared directory is created if it doesn't exist, ensuring Codex session
+// logs are always written to the global home where users can find them.
+var codexSymlinkedDirs = []string{
+	"sessions",
+}
+
 // Files to symlink from the shared ~/.codex/ into the per-task CODEX_HOME.
 // Symlinks share state (e.g. auth tokens) so changes propagate automatically.
 var codexSymlinkedFiles = []string{
@@ -22,14 +29,46 @@ var codexCopiedFiles = []string{
 	"instructions.md",
 }
 
-// prepareCodexHome creates a per-task CODEX_HOME directory and seeds it with
-// config from the shared ~/.codex/ home. Auth is symlinked (shared), config
-// files are copied (isolated).
+// CodexHomeOptions carries optional inputs for prepareCodexHomeWithOpts that
+// affect the generated per-task config.toml.
+type CodexHomeOptions struct {
+	// CodexVersion is the detected Codex CLI version (e.g. "0.121.0"). Empty
+	// means unknown; on macOS, unknown is treated as "probably broken" so the
+	// daemon falls back to danger-full-access for network access. See
+	// codex_sandbox.go for details.
+	CodexVersion string
+	// GOOS overrides the target platform when deciding the sandbox policy.
+	// Empty means use runtime.GOOS. Primarily exists so tests can exercise
+	// both macOS and Linux paths deterministically.
+	GOOS string
+}
+
+// prepareCodexHome is a thin wrapper around prepareCodexHomeWithOpts kept for
+// tests that don't care about platform-aware sandbox configuration. It
+// assumes a Linux-like environment where workspace-write + network_access
+// works correctly.
 func prepareCodexHome(codexHome string, logger *slog.Logger) error {
+	return prepareCodexHomeWithOpts(codexHome, CodexHomeOptions{GOOS: "linux"}, logger)
+}
+
+// prepareCodexHomeWithOpts creates a per-task CODEX_HOME directory and seeds
+// it with config from the shared ~/.codex/ home. Auth is symlinked (shared),
+// config files are copied (isolated). The per-task config.toml gets a
+// daemon-managed sandbox block picked by codexSandboxPolicyFor.
+func prepareCodexHomeWithOpts(codexHome string, opts CodexHomeOptions, logger *slog.Logger) error {
 	sharedHome := resolveSharedCodexHome()
 
 	if err := os.MkdirAll(codexHome, 0o755); err != nil {
 		return fmt.Errorf("create codex-home dir: %w", err)
+	}
+
+	// Symlink shared directories (sessions) so logs stay in the global home.
+	for _, name := range codexSymlinkedDirs {
+		src := filepath.Join(sharedHome, name)
+		dst := filepath.Join(codexHome, name)
+		if err := ensureDirSymlink(src, dst); err != nil {
+			logger.Warn("execenv: codex-home dir symlink failed", "dir", name, "error", err)
+		}
 	}
 
 	// Symlink shared files (auth).
@@ -50,6 +89,14 @@ func prepareCodexHome(codexHome string, logger *slog.Logger) error {
 		}
 	}
 
+	// Write a daemon-managed sandbox block into config.toml. On macOS we may
+	// need to fall back to danger-full-access because of openai/codex#10390;
+	// see codex_sandbox.go for the full rationale.
+	policy := codexSandboxPolicyFor(opts.GOOS, opts.CodexVersion)
+	if err := ensureCodexSandboxConfig(filepath.Join(codexHome, "config.toml"), policy, opts.CodexVersion, logger); err != nil {
+		logger.Warn("execenv: codex-home ensure sandbox config failed", "error", err)
+	}
+
 	return nil
 }
 
@@ -64,9 +111,34 @@ func resolveSharedCodexHome() string {
 	}
 	home, err := os.UserHomeDir()
 	if err != nil {
-		return filepath.Join("/tmp", ".codex") // last resort fallback
+		return filepath.Join(os.TempDir(), ".codex") // last resort fallback
 	}
 	return filepath.Join(home, ".codex")
+}
+
+// ensureDirSymlink creates a symlink dst → src for a directory.
+// Unlike ensureSymlink, it creates the source directory if it doesn't exist,
+// so Codex can write to it immediately.
+func ensureDirSymlink(src, dst string) error {
+	if err := os.MkdirAll(src, 0o755); err != nil {
+		return fmt.Errorf("create shared dir %s: %w", src, err)
+	}
+
+	// Check if dst already exists.
+	if fi, err := os.Lstat(dst); err == nil {
+		if fi.Mode()&os.ModeSymlink != 0 {
+			target, err := os.Readlink(dst)
+			if err == nil && target == src {
+				return nil // already correct
+			}
+			os.Remove(dst)
+		} else {
+			// Regular file/dir exists — don't overwrite.
+			return nil
+		}
+	}
+
+	return createDirLink(src, dst)
 }
 
 // ensureSymlink creates a symlink dst → src. If src doesn't exist, it's a no-op.
@@ -93,8 +165,14 @@ func ensureSymlink(src, dst string) error {
 		}
 	}
 
-	return os.Symlink(src, dst)
+	return createFileLink(src, dst)
 }
+
+// (The daemon used to write a minimal inline config here; the authoritative
+// sandbox/network directives now live in a managed block rendered by
+// codex_sandbox.go's ensureCodexSandboxConfig so they can be updated
+// idempotently without touching user-managed keys.)
+
 
 // copyFileIfExists copies src to dst. If src doesn't exist, it's a no-op.
 // If dst already exists, it's not overwritten.
@@ -108,6 +186,11 @@ func copyFileIfExists(src, dst string) error {
 		return nil
 	}
 
+	return copyFile(src, dst)
+}
+
+// copyFile copies src to dst unconditionally.
+func copyFile(src, dst string) error {
 	in, err := os.Open(src)
 	if err != nil {
 		return fmt.Errorf("open %s: %w", src, err)

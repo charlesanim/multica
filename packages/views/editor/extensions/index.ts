@@ -40,6 +40,7 @@ import { createMentionSuggestion } from "./mention-suggestion";
 import { CodeBlockView } from "./code-block-view";
 import { createMarkdownPasteExtension } from "./markdown-paste";
 import { createSubmitExtension } from "./submit-shortcut";
+import { createBlurShortcutExtension } from "./blur-shortcut";
 import { createFileUploadExtension } from "./file-upload";
 import { FileCardExtension } from "./file-card";
 import { ImageView } from "./image-view";
@@ -47,9 +48,10 @@ import { ImageView } from "./image-view";
 const lowlight = createLowlight(common);
 
 const LinkEditable = Link.extend({ inclusive: false }).configure({
-  openOnClick: true,
+  openOnClick: false,
   autolink: true,
-  linkOnPaste: false,
+  linkOnPaste: true,
+  defaultProtocol: "https",
 });
 
 const LinkReadonly = Link.configure({
@@ -85,6 +87,8 @@ export interface EditorExtensionsOptions {
   onUploadFileRef?: RefObject<
     ((file: File) => Promise<UploadResult | null>) | undefined
   >;
+  /** When true, bare Enter also submits (chat-style). Default false. */
+  submitOnEnter?: boolean;
 }
 
 export function createEditorExtensions(
@@ -103,6 +107,9 @@ export function createEditorExtensions(
         return ReactNodeViewRenderer(CodeBlockView);
       },
     }).configure({ lowlight }),
+    // ⚠️ Link MUST appear before markdownPaste in this array.
+    // linkOnPaste relies on Link's handlePaste plugin firing first;
+    // markdownPaste's handlePaste is a catch-all that returns true.
     editable ? LinkEditable : LinkReadonly,
     ImageExtension,
     Table.configure({ resizable: false }),
@@ -122,7 +129,16 @@ export function createEditorExtensions(
       Typography,
       Placeholder.configure({ placeholder: placeholderText }),
       createMarkdownPasteExtension(),
-      createSubmitExtension(() => options.onSubmitRef?.current?.()),
+      createSubmitExtension(
+        () => {
+          const fn = options.onSubmitRef?.current;
+          if (!fn) return false; // no submit wired — let default Enter insert newline
+          fn();
+          return true;
+        },
+        { submitOnEnter: options.submitOnEnter ?? false },
+      ),
+      createBlurShortcutExtension(),
       createFileUploadExtension(options.onUploadFileRef!),
     );
   }

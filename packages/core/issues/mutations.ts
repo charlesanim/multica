@@ -1,8 +1,9 @@
 import { useState, useCallback } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { api } from "../api";
-import { issueKeys, CLOSED_PAGE_SIZE } from "./queries";
+import { issueKeys, CLOSED_PAGE_SIZE, type MyIssuesFilter } from "./queries";
 import { useWorkspaceId } from "../hooks";
+import { useRecentIssuesStore } from "./stores";
 import type { Issue, IssueReaction } from "../types";
 import type {
   CreateIssueRequest,
@@ -31,12 +32,15 @@ export type ToggleIssueReactionVars = {
 // Done issue pagination
 // ---------------------------------------------------------------------------
 
-export function useLoadMoreDoneIssues() {
+export function useLoadMoreDoneIssues(myIssues?: { scope: string; filter: MyIssuesFilter }) {
   const qc = useQueryClient();
   const wsId = useWorkspaceId();
   const [isLoading, setIsLoading] = useState(false);
 
-  const cache = qc.getQueryData<ListIssuesResponse>(issueKeys.list(wsId));
+  const queryKey = myIssues
+    ? issueKeys.myList(wsId, myIssues.scope, myIssues.filter)
+    : issueKeys.list(wsId);
+  const cache = qc.getQueryData<ListIssuesResponse>(queryKey);
   const doneLoaded = cache
     ? cache.issues.filter((i) => i.status === "done").length
     : 0;
@@ -51,8 +55,9 @@ export function useLoadMoreDoneIssues() {
         status: "done",
         limit: CLOSED_PAGE_SIZE,
         offset: doneLoaded,
+        ...myIssues?.filter,
       });
-      qc.setQueryData<ListIssuesResponse>(issueKeys.list(wsId), (old) => {
+      qc.setQueryData<ListIssuesResponse>(queryKey, (old) => {
         if (!old) return old;
         const existingIds = new Set(old.issues.map((i) => i.id));
         const newIssues = res.issues.filter((i) => !existingIds.has(i.id));
@@ -65,7 +70,7 @@ export function useLoadMoreDoneIssues() {
     } finally {
       setIsLoading(false);
     }
-  }, [qc, wsId, doneLoaded, hasMore, isLoading]);
+  }, [qc, queryKey, doneLoaded, hasMore, isLoading, myIssues?.filter]);
 
   return { loadMore, hasMore, isLoading, doneTotal };
 }
@@ -90,9 +95,13 @@ export function useCreateIssue() {
             }
           : old,
       );
+      // Surface the just-created issue in cmd+k's Recent list without
+      // requiring the user to open it first.
+      useRecentIssuesStore.getState().recordVisit(newIssue.id);
       // Invalidate parent's children query so sub-issues list updates immediately
       if (newIssue.parent_issue_id) {
         qc.invalidateQueries({ queryKey: issueKeys.children(wsId, newIssue.parent_issue_id) });
+        qc.invalidateQueries({ queryKey: issueKeys.childProgress(wsId) });
       }
     },
     onSettled: () => {
@@ -163,10 +172,20 @@ export function useUpdateIssue() {
     onSettled: (_data, _err, vars, ctx) => {
       qc.invalidateQueries({ queryKey: issueKeys.detail(wsId, vars.id) });
       qc.invalidateQueries({ queryKey: issueKeys.list(wsId) });
+      // Invalidate old parent's children cache
       if (ctx?.parentId) {
         qc.invalidateQueries({
           queryKey: issueKeys.children(wsId, ctx.parentId),
         });
+        qc.invalidateQueries({ queryKey: issueKeys.childProgress(wsId) });
+      }
+      // Invalidate new parent's children cache when parent_issue_id changed
+      const newParentId = vars.parent_issue_id;
+      if (newParentId && newParentId !== ctx?.parentId) {
+        qc.invalidateQueries({
+          queryKey: issueKeys.children(wsId, newParentId),
+        });
+        qc.invalidateQueries({ queryKey: issueKeys.childProgress(wsId) });
       }
     },
   });
@@ -180,24 +199,29 @@ export function useDeleteIssue() {
     onMutate: async (id) => {
       await qc.cancelQueries({ queryKey: issueKeys.list(wsId) });
       const prevList = qc.getQueryData<ListIssuesResponse>(issueKeys.list(wsId));
+      const deleted = prevList?.issues.find((i) => i.id === id);
       qc.setQueryData<ListIssuesResponse>(issueKeys.list(wsId), (old) => {
         if (!old) return old;
-        const deleted = old.issues.find((i) => i.id === id);
+        const d = old.issues.find((i) => i.id === id);
         return {
           ...old,
           issues: old.issues.filter((i) => i.id !== id),
           total: old.total - 1,
-          doneTotal: (old.doneTotal ?? 0) - (deleted?.status === "done" ? 1 : 0),
+          doneTotal: (old.doneTotal ?? 0) - (d?.status === "done" ? 1 : 0),
         };
       });
       qc.removeQueries({ queryKey: issueKeys.detail(wsId, id) });
-      return { prevList };
+      return { prevList, parentIssueId: deleted?.parent_issue_id };
     },
     onError: (_err, _id, ctx) => {
       if (ctx?.prevList) qc.setQueryData(issueKeys.list(wsId), ctx.prevList);
     },
-    onSettled: () => {
+    onSettled: (_data, _err, _id, ctx) => {
       qc.invalidateQueries({ queryKey: issueKeys.list(wsId) });
+      if (ctx?.parentIssueId) {
+        qc.invalidateQueries({ queryKey: issueKeys.children(wsId, ctx.parentIssueId) });
+        qc.invalidateQueries({ queryKey: issueKeys.childProgress(wsId) });
+      }
     },
   });
 }
@@ -245,9 +269,14 @@ export function useBatchDeleteIssues() {
     onMutate: async (ids) => {
       await qc.cancelQueries({ queryKey: issueKeys.list(wsId) });
       const prevList = qc.getQueryData<ListIssuesResponse>(issueKeys.list(wsId));
+      const idSet = new Set(ids);
+      const parentIssueIds = new Set(
+        prevList?.issues
+          .filter((i) => idSet.has(i.id) && i.parent_issue_id)
+          .map((i) => i.parent_issue_id!) ?? [],
+      );
       qc.setQueryData<ListIssuesResponse>(issueKeys.list(wsId), (old) => {
         if (!old) return old;
-        const idSet = new Set(ids);
         const doneDeleted = old.issues.filter(
           (i) => idSet.has(i.id) && i.status === "done",
         ).length;
@@ -258,13 +287,19 @@ export function useBatchDeleteIssues() {
           doneTotal: (old.doneTotal ?? 0) - doneDeleted,
         };
       });
-      return { prevList };
+      return { prevList, parentIssueIds };
     },
     onError: (_err, _ids, ctx) => {
       if (ctx?.prevList) qc.setQueryData(issueKeys.list(wsId), ctx.prevList);
     },
-    onSettled: () => {
+    onSettled: (_data, _err, _ids, ctx) => {
       qc.invalidateQueries({ queryKey: issueKeys.list(wsId) });
+      if (ctx?.parentIssueIds && ctx.parentIssueIds.size > 0) {
+        for (const parentId of ctx.parentIssueIds) {
+          qc.invalidateQueries({ queryKey: issueKeys.children(wsId, parentId) });
+        }
+        qc.invalidateQueries({ queryKey: issueKeys.childProgress(wsId) });
+      }
     },
   });
 }

@@ -1,8 +1,8 @@
 "use client";
 
-import { useRef, useState, useEffect } from "react";
+import { useRef, useState, useEffect, useCallback } from "react";
 import { ArrowUp, Loader2 } from "lucide-react";
-import { ContentEditor, type ContentEditorRef } from "../../editor";
+import { ContentEditor, type ContentEditorRef, useFileDropZone, FileDropOverlay } from "../../editor";
 import { FileUploadButton } from "@multica/ui/components/common/file-upload-button";
 import { ActorAvatar } from "../../common/actor-avatar";
 import { useFileUpload } from "@multica/core/hooks/use-file-upload";
@@ -39,8 +39,11 @@ function ReplyInput({
   const [isEmpty, setIsEmpty] = useState(true);
   const [isExpanded, setIsExpanded] = useState(false);
   const [submitting, setSubmitting] = useState(false);
-  const [attachmentIds, setAttachmentIds] = useState<string[]>([]);
+  const uploadMapRef = useRef<Map<string, string>>(new Map());
   const { uploadWithToast } = useFileUpload(api);
+  const { isDragOver, dropZoneProps } = useFileDropZone({
+    onDrop: (files) => files.forEach((f) => editorRef.current?.uploadFile(f)),
+  });
 
   useEffect(() => {
     const el = measureRef.current;
@@ -53,23 +56,28 @@ function ReplyInput({
     return () => observer.disconnect();
   }, []);
 
-  const handleUpload = async (file: File) => {
+  const handleUpload = useCallback(async (file: File) => {
     const result = await uploadWithToast(file, { issueId });
     if (result) {
-      setAttachmentIds((prev) => [...prev, result.id]);
+      uploadMapRef.current.set(result.link, result.id);
     }
     return result;
-  };
+  }, [uploadWithToast, issueId]);
 
   const handleSubmit = async () => {
     const content = editorRef.current?.getMarkdown()?.replace(/(\n\s*)+$/, "").trim();
     if (!content || submitting) return;
+    // Only send attachment IDs for uploads still present in the content.
+    const activeIds: string[] = [];
+    for (const [url, id] of uploadMapRef.current) {
+      if (content.includes(url)) activeIds.push(id);
+    }
     setSubmitting(true);
     try {
-      await onSubmit(content, attachmentIds.length > 0 ? attachmentIds : undefined);
+      await onSubmit(content, activeIds.length > 0 ? activeIds : undefined);
       editorRef.current?.clearContent();
       setIsEmpty(true);
-      setAttachmentIds([]);
+      uploadMapRef.current.clear();
     } finally {
       setSubmitting(false);
     }
@@ -86,6 +94,7 @@ function ReplyInput({
         className="mt-0.5 shrink-0"
       />
       <div
+        {...dropZoneProps}
         className={cn(
           "relative min-w-0 flex-1 flex flex-col",
           size === "sm" ? "max-h-40" : "max-h-56",
@@ -122,6 +131,7 @@ function ReplyInput({
             )}
           </button>
         </div>
+        {isDragOver && <FileDropOverlay />}
       </div>
     </div>
   );

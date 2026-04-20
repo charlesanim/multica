@@ -4,9 +4,14 @@
  * FileCard — Tiptap node extension for rendering uploaded non-image files
  * as styled cards instead of plain markdown links.
  *
- * Markdown serialization: `[filename](href)` — standard link syntax.
- * Preprocessing in preprocess.ts converts standalone CDN file links back
- * to fileCard HTML on load, completing the roundtrip.
+ * Markdown serialization: `!file[filename](href)` — custom syntax that is
+ * unambiguous (standard `[name](url)` is indistinguishable from regular links).
+ *
+ * Loading pipeline: preprocessFileCards in preprocess.ts converts both the
+ * new `!file[name](url)` syntax AND legacy `[name](cdnUrl)` lines into HTML
+ * divs BEFORE @tiptap/markdown parses the content. The markdownTokenizer
+ * below acts as a fallback for any direct markdown parsing that bypasses
+ * preprocessing.
  */
 
 import { Node, mergeAttributes } from "@tiptap/core";
@@ -16,38 +21,8 @@ import { FileText, Loader2, Download } from "lucide-react";
 
 
 // ---------------------------------------------------------------------------
-// CDN URL detection
-// ---------------------------------------------------------------------------
-
-const IMAGE_EXTS = /\.(png|jpe?g|gif|webp|svg|ico|bmp|tiff?)$/i;
-
-/** Check if a URL points to our upload CDN (CloudFront or S3 bucket). */
-export function isCdnUrl(url: string): boolean {
-  try {
-    const u = new URL(url);
-    return (
-      u.hostname.endsWith(".copilothub.ai") ||
-      u.hostname.endsWith(".amazonaws.com")
-    );
-  } catch {
-    return false;
-  }
-}
-
-/** Check if a CDN URL is a non-image file that should render as a file card. */
-export function isFileCardUrl(url: string): boolean {
-  return isCdnUrl(url) && !IMAGE_EXTS.test(new URL(url).pathname);
-}
-
-// ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
-
-function formatFileSize(bytes: number): string {
-  if (bytes < 1024) return `${bytes} B`;
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
-  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
-}
 
 // ---------------------------------------------------------------------------
 // React NodeView
@@ -56,7 +31,6 @@ function formatFileSize(bytes: number): string {
 function FileCardView({ node }: NodeViewProps) {
   const href = (node.attrs.href as string) || "";
   const filename = (node.attrs.filename as string) || "";
-  const fileSize = node.attrs.fileSize as number;
   const uploading = node.attrs.uploading as boolean;
 
   const openFile = () => {
@@ -65,7 +39,6 @@ function FileCardView({ node }: NodeViewProps) {
 
   return (
     <NodeViewWrapper as="div" className="file-card-node" data-type="fileCard">
-      {/* eslint-disable-next-line jsx-a11y/no-static-element-interactions */}
       <div
         className="my-1 flex items-center gap-2 rounded-md border border-border bg-muted/50 px-2.5 py-1 transition-colors hover:bg-muted"
         contentEditable={false}
@@ -154,10 +127,31 @@ export const FileCardExtension = Node.create({
     ];
   },
 
-  // Markdown serialization: fileCard → [filename](href)
+  // Markdown: custom !file[name](url) syntax for unambiguous roundtrip.
+  // Standard [name](url) is indistinguishable from regular links — the old
+  // regex-based CDN hostname matching in preprocessFileCards was fragile.
+  markdownTokenizer: {
+    name: "fileCard",
+    level: "block" as const,
+    start(src: string) {
+      return src.search(/^!file\[/m);
+    },
+    tokenize(src: string) {
+      const match = src.match(/^!file\[([^\]]*)\]\((https?:\/\/[^)]+)\)/);
+      if (!match) return undefined;
+      return {
+        type: "fileCard",
+        raw: match[0],
+        attributes: { filename: match[1], href: match[2] },
+      };
+    },
+  },
+  parseMarkdown: (token: any, helpers: any) => {
+    return helpers.createNode("fileCard", token.attributes);
+  },
   renderMarkdown: (node: any) => {
     const { href, filename } = node.attrs || {};
-    return `[${filename || "file"}](${href})`;
+    return `!file[${filename || "file"}](${href})`;
   },
 
   addNodeView() {

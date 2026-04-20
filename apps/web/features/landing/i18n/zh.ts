@@ -1,6 +1,8 @@
 import { githubUrl } from "../components/shared";
 import type { LandingDict } from "./types";
 
+export const ALLOW_SIGNUP = process.env.NEXT_PUBLIC_ALLOW_SIGNUP !== "false";
+
 export const zh: LandingDict = {
   header: {
     github: "GitHub",
@@ -13,8 +15,9 @@ export const zh: LandingDict = {
     headlineLine2: "\u4e0d\u662f\u4eba\u7c7b\u3002",
     subheading:
       "Multica \u662f\u4e00\u4e2a\u5f00\u6e90\u5e73\u53f0\uff0c\u5c06\u7f16\u7801 Agent \u53d8\u6210\u771f\u6b63\u7684\u961f\u53cb\u3002\u5206\u914d\u4efb\u52a1\u3001\u8ddf\u8e2a\u8fdb\u5ea6\u3001\u79ef\u7d2f\u6280\u80fd\u2014\u2014\u5728\u4e00\u4e2a\u5730\u65b9\u7ba1\u7406\u4f60\u7684\u4eba\u7c7b + Agent \u56e2\u961f\u3002",
-    cta: "\u514d\u8d39\u5f00\u59cb",
-    worksWith: "\u652f\u6301",
+    cta: "免费开始",
+    downloadDesktop: "下载桌面端",
+    worksWith: "支持",
     imageAlt: "Multica \u770b\u677f\u89c6\u56fe\u2014\u2014\u4eba\u7c7b\u548c Agent \u534f\u540c\u7ba1\u7406\u4efb\u52a1",
   },
 
@@ -119,14 +122,15 @@ export const zh: LandingDict = {
     headlineFaded: "\u53ea\u9700\u4e00\u5c0f\u65f6\u3002",
     steps: [
       {
-        title: "\u6ce8\u518c\u5e76\u521b\u5efa\u5de5\u4f5c\u533a",
-        description:
-          "\u8f93\u5165\u90ae\u7bb1\uff0c\u9a8c\u8bc1\u7801\u786e\u8ba4\uff0c\u5373\u53ef\u8fdb\u5165\u3002\u5de5\u4f5c\u533a\u81ea\u52a8\u521b\u5efa\u2014\u2014\u65e0\u9700\u8bbe\u7f6e\u5411\u5bfc\uff0c\u65e0\u9700\u914d\u7f6e\u8868\u5355\u3002",
+        title: ALLOW_SIGNUP ? "注册并创建您的工作空间" : "登录到您的工作空间",
+        description: ALLOW_SIGNUP
+          ? "输入您的邮箱，验证代码后即可使用。工作空间会自动创建——无需设置向导或配置表单。"
+          : "输入您的邮箱，验证代码后即可登录到您的工作空间——无需设置向导或配置表单。",
       },
       {
         title: "\u5b89\u88c5 CLI \u5e76\u8fde\u63a5\u4f60\u7684\u673a\u5668",
         description:
-          "\u8fd0\u884c multica login \u8fdb\u884c\u8ba4\u8bc1\uff0c\u7136\u540e multica daemon start\u3002\u5b88\u62a4\u8fdb\u7a0b\u81ea\u52a8\u68c0\u6d4b\u4f60\u673a\u5668\u4e0a\u7684 Claude Code\u3001Codex\u3001OpenClaw \u548c OpenCode\u2014\u2014\u63d2\u4e0a\u5c31\u7528\u3002",
+          "运行 multica setup 一键完成配置、认证和启动。守护进程自动检测你机器上的 Claude Code、Codex、OpenClaw 和 OpenCode——插上就用。",
       },
       {
         title: "\u521b\u5efa\u4f60\u7684\u7b2c\u4e00\u4e2a Agent",
@@ -222,7 +226,8 @@ export const zh: LandingDict = {
         links: [
           { label: "\u529f\u80fd\u7279\u6027", href: "#features" },
           { label: "\u5982\u4f55\u5de5\u4f5c", href: "#how-it-works" },
-          { label: "\u66f4\u65b0\u65e5\u5fd7", href: "/changelog" },
+          { label: "更新日志", href: "/changelog" },
+          { label: "桌面端", href: "https://github.com/multica-ai/multica/releases/latest" },
         ],
       },
       resources: {
@@ -230,7 +235,7 @@ export const zh: LandingDict = {
         links: [
           { label: "\u6587\u6863", href: githubUrl },
           { label: "API", href: githubUrl },
-          { label: "X (Twitter)", href: "https://x.com/multica_hq" },
+          { label: "X (Twitter)", href: "https://x.com/MulticaAI" },
         ],
       },
       company: {
@@ -271,7 +276,231 @@ export const zh: LandingDict = {
   changelog: {
     title: "\u66f4\u65b0\u65e5\u5fd7",
     subtitle: "Multica \u7684\u6700\u65b0\u66f4\u65b0\u548c\u6539\u8fdb\u3002",
+    categories: {
+      features: "新功能",
+      improvements: "改进",
+      fixes: "问题修复",
+    },
     entries: [
+      {
+        version: "0.2.5",
+        date: "2026-04-17",
+        title: "CLI Autopilot、Cmd+K 与 Daemon 身份",
+        changes: [],
+        features: [
+          "CLI `autopilot` 命令，管理定时和触发式自动化",
+          "CLI `issue subscriber` 订阅管理命令",
+          "Cmd+K 命令面板扩展——主题切换、快速创建 Issue/项目、复制链接、切换工作区",
+          "Issue 列表卡片可选显示项目和子 Issue 进度",
+          "Daemon 持久化 UUID 身份——CLI 和桌面应用共用同一个 daemon，跨重启和机器迁移保持一致",
+          "唯一所有者退出工作区的前置检查",
+          "评论折叠状态跨会话持久化",
+        ],
+        fixes: [
+          "Agent 现在在任意 Issue 状态下都会响应评论触发",
+          "修复 Codex 沙箱在 macOS 上的网络访问配置",
+          "编辑器气泡菜单改用 @floating-ui/dom 重写，滚动时正确隐藏",
+          "Autopilot 创建者自动订阅其生成的 Issue",
+          "Autopilot run-only 任务正确解析工作区 ID",
+          "桌面应用 `shell.openExternal` 限制仅允许 http/https 协议（安全）",
+          "重名 Agent 创建返回 409 而非静默失败",
+          "桌面应用新建标签页继承当前工作区",
+        ],
+      },
+      {
+        version: "0.2.1",
+        date: "2026-04-16",
+        title: "新增 Agent 运行时",
+        changes: [],
+        features: [
+          "支持 GitHub Copilot CLI 运行时",
+          "支持 Cursor Agent CLI 运行时",
+          "支持 Pi Agent 运行时",
+          "工作区 URL 改造——slug 优先路由（`/{slug}/issues`），旧链接自动重定向",
+        ],
+        fixes: [
+          "Codex 同一 Issue 下跨任务恢复会话线程",
+          "Codex 回合错误正确抛出，不再报告空输出",
+          "工作区用量按任务完成时间正确分桶",
+          "Autopilot 运行历史行整行可点击",
+          "Daemon 和 GC 端点加强工作区隔离校验（安全）",
+          "邀请邮件中的工作区和邀请人名称进行 HTML 转义",
+          "桌面应用开发版和生产版现在可以同时运行",
+        ],
+      },
+      {
+        version: "0.2.0",
+        date: "2026-04-15",
+        title: "桌面应用、Autopilot 与邀请",
+        changes: [],
+        features: [
+          "macOS 桌面应用——原生 Electron 应用，支持标签页系统、内置 Daemon 管理、沉浸模式和自动更新",
+          "Autopilot——Agent 定时和触发式自动化任务",
+          "工作区邀请，支持邮件通知和专用接受页面",
+          "Agent 自定义 CLI 参数，支持高级运行时配置",
+          "聊天界面重设计，新增未读追踪和会话管理优化",
+          "创建 Agent 对话框显示运行时所有者和 Mine/All 筛选",
+        ],
+        improvements: [
+          "Inter 字体 + CJK 回退，中英文自动间距",
+          "侧边栏用户菜单改为整行弹出面板",
+          "WebSocket ping/pong 心跳检测断线连接",
+          "普通成员现在可以创建 Agent 和管理自己的 Skills",
+        ],
+        fixes: [
+          "Agent 在已参与的线程收到回复时正确触发",
+          "自部署：Docker 本地上传文件持久化，WebSocket URL 自动适配局域网",
+          "Cmd+K 最近 Issue 列表状态过期",
+        ],
+      },
+      {
+        version: "0.1.33",
+        date: "2026-04-14",
+        title: "Gemini CLI 与 Agent 环境变量",
+        changes: [],
+        features: [
+          "Google Gemini CLI 作为新的 Agent 运行时，支持实时日志流",
+          "Agent 自定义环境变量（router/proxy 模式），新增专用设置标签页",
+          "Issue 右键菜单新增「设置父 Issue」和「添加子 Issue」",
+          "CLI `--parent` 更新父 Issue，`--content-stdin` 管道输入评论内容",
+          "子 Issue 自动继承父级项目",
+        ],
+        improvements: [
+          "编辑器气泡菜单和链接预览重写",
+          "OpenClaw 后端 P0+P1 优化（多行 JSON、增量解析）",
+          "自部署 WebSocket URL 自动适配局域网访问",
+        ],
+        fixes: [
+          "S3 上传路径按工作区隔离（安全）",
+          "订阅和上传新增工作区成员身份校验（安全）",
+          "Issue 状态改为已取消时自动终止进行中的任务",
+          "Agent 进程 stdout 挂起导致任务卡住",
+          "Daemon 触发提示现在嵌入实际的触发评论内容",
+          "登录和仪表盘跳转稳定性改进",
+        ],
+      },
+      {
+        version: "0.1.28",
+        date: "2026-04-13",
+        title: "Windows 支持、认证与引导",
+        changes: [],
+        features: [
+          "Windows 支持——CLI 安装、Daemon 运行和发布构建",
+          "认证迁移至 HttpOnly Cookie，WebSocket 新增 Origin 白名单",
+          "新工作区全屏引导向导",
+          "Master Agent 聊天窗口可调整大小，会话历史体验优化",
+          "OpenCode、OpenClaw 和 Hermes 运行时 Token 用量日志扫描",
+        ],
+        fixes: [
+          "WebSocket 首条消息认证安全修复",
+          "新增 Content-Security-Policy 响应头",
+          "子 Issue 进度改为从数据库计算而非分页客户端缓存",
+        ],
+      },
+      {
+        version: "0.1.27",
+        date: "2026-04-12",
+        title: "一键安装、自部署与稳定性",
+        changes: [],
+        features: [
+          "一键安装与配置——`curl | bash` 安装 CLI，`--with-server` 完整自部署，`multica setup` 配置连接环境",
+          "自部署存储——无 S3 时本地文件存储回退，支持自定义 S3 端点（MinIO）",
+          "项目列表页支持行内编辑属性（优先级、状态、负责人）",
+        ],
+        improvements: [
+          "过期 Agent 任务自动清扫；执行卡片立即显示，无需等待首条消息",
+          "通过 CLI 上传的评论附件现在可在 UI 中显示",
+          "置顶项按用户隔离，修复侧边栏置顶操作",
+        ],
+        fixes: [
+          "Daemon API 路由和附件上传新增工作区所有权校验",
+          "Markdown 清洗器保留代码块不被 HTML 实体转义",
+          "Next.js 升级至 ^16.2.3 修复 CVE-2026-23869",
+          "OpenClaw 后端重写以匹配实际 CLI 接口",
+        ],
+      },
+      {
+        version: "0.1.24",
+        date: "2026-04-11",
+        title: "安全加固与通知",
+        changes: [],
+        features: [
+          "子 Issue 变更时通知父 Issue 的订阅者",
+          "CLI `--project` 筛选 Issue 列表",
+        ],
+        improvements: [
+          "Meta-skill 工作流改为委托 Agent Skills 而非硬编码逻辑",
+        ],
+        fixes: [
+          "Daemon API 路由新增工作区所有权校验",
+          "附件上传和查询新增工作区所有权验证",
+          "回复评论不再继承父级线程的 Agent 提及",
+          "Agent 创建评论缺少 workspace ID",
+          "自部署 Docker 构建问题修复（文件权限、CRLF 换行、缺失依赖）",
+        ],
+      },
+      {
+        version: "0.1.23",
+        date: "2026-04-11",
+        title: "置顶、Cmd+K 与项目增强",
+        changes: [],
+        features: [
+          "Issue 和项目置顶到侧边栏，支持拖拽排序",
+          "Cmd+K 命令面板——最近访问的 Issue、页面导航、项目搜索",
+          "项目详情侧边栏属性面板（替代原概览标签页）",
+          "Issues 列表新增项目筛选",
+          "项目列表显示完成进度",
+          "在项目页按 'C' 创建 Issue 时自动填充项目",
+          "指派人下拉按用户分配频率排序",
+        ],
+        fixes: [
+          "Markdown XSS 漏洞——评论渲染增加 rehype-sanitize 和服务端 bluemonday 清洗",
+          "项目看板 Issue 计数不正确",
+          "自部署 Docker 构建缺少 tsconfig 依赖",
+          "Cmd+K 需要按两次 ESC 才能关闭",
+        ],
+      },
+      {
+        version: "0.1.22",
+        date: "2026-04-10",
+        title: "自部署、ACP 与文档站",
+        changes: [],
+        features: [
+          "全栈 Docker Compose 一键自部署",
+          "通过 ACP 协议接入 Hermes Agent Provider",
+          "基于 Fumadocs 搭建文档站（快速入门、CLI 参考、Agent 指南）",
+          "侧边栏和收件箱移动端响应式布局",
+          "Issue 详情侧边栏展示 Token 用量",
+          "支持在 UI 中切换 Agent 运行时",
+          "'C' 快捷键快速创建 Issue",
+          "聊天会话历史面板，查看已归档对话",
+          "Daemon 新增 Claude Code 和 Codex 最低版本检查",
+          "官网新增 OpenClaw 和 OpenCode 展示",
+          "`make dev` 一键本地开发环境搭建",
+        ],
+        improvements: [
+          "侧边栏重新设计——个人/工作区分组、用户档案底栏、⌘K 搜索入口",
+          "搜索排序优化——大小写无关匹配、标识符搜索（MUL-123）、多词匹配",
+          "搜索结果关键词高亮",
+          "每日 Token 用量图表优化，Y 轴标签更清晰，新增分类 Tooltip",
+          "Master Agent 支持多行输入",
+          "统一选择器组件（状态、优先级、截止日期、项目、指派人）",
+          "工作区级别存储隔离，切换工作区时自动加载对应数据",
+          "自部署环境变量缺失时给出启动警告",
+        ],
+        fixes: [
+          "删除子 Issue 后父级列表未刷新",
+          "搜索索引兼容 RDS 上的 pg_bigm 1.2",
+          "创建 Agent 对话框错误显示「无可用运行时」",
+          "Claude stream-json 启动卡住",
+          "多个 Agent 无法同时为同一 Issue 排队任务",
+          "退出登录未清除工作区和查询缓存",
+          "编辑器为空时拖放区域过小",
+          "Skills 导入硬编码 main 分支导致 404",
+          "WebSocket 端点不支持 PAT 认证",
+          "所有 Agent 已归档时无法删除运行时",
+        ],
+      },
       {
         version: "0.1.21",
         date: "2026-04-09",

@@ -11,6 +11,7 @@ export interface RuntimeDevice {
   name: string;
   runtime_mode: AgentRuntimeMode;
   provider: string;
+  launch_header: string;
   status: "online" | "offline";
   device_info: string;
   metadata: Record<string, unknown>;
@@ -47,6 +48,9 @@ export interface Agent {
   avatar_url: string | null;
   runtime_mode: AgentRuntimeMode;
   runtime_config: Record<string, unknown>;
+  custom_env: Record<string, string>;
+  custom_args: string[];
+  custom_env_redacted: boolean;
   visibility: AgentVisibility;
   status: AgentStatus;
   max_concurrent_tasks: number;
@@ -66,6 +70,8 @@ export interface CreateAgentRequest {
   avatar_url?: string;
   runtime_id: string;
   runtime_config?: Record<string, unknown>;
+  custom_env?: Record<string, string>;
+  custom_args?: string[];
   visibility?: AgentVisibility;
   max_concurrent_tasks?: number;
   model?: string;
@@ -78,6 +84,8 @@ export interface UpdateAgentRequest {
   avatar_url?: string;
   runtime_id?: string;
   runtime_config?: Record<string, unknown>;
+  custom_env?: Record<string, string>;
+  custom_args?: string[];
   visibility?: AgentVisibility;
   status?: AgentStatus;
   max_concurrent_tasks?: number;
@@ -139,6 +147,14 @@ export interface RuntimePing {
   duration_ms?: number;
   created_at: string;
   updated_at: string;
+}
+
+export interface IssueUsageSummary {
+  total_input_tokens: number;
+  total_output_tokens: number;
+  total_cache_read_tokens: number;
+  total_cache_write_tokens: number;
+  task_count: number;
 }
 
 export interface RuntimeUsage {

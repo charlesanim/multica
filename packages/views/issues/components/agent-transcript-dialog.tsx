@@ -422,6 +422,7 @@ function formatProvider(provider: string): string {
     claude: "Claude Code",
     "claude-code": "Claude Code",
     codex: "Codex",
+    pi: "Pi",
   };
   return map[provider.toLowerCase()] ?? provider;
 }
@@ -503,9 +504,9 @@ interface TranscriptEventRowProps {
 const TranscriptEventRow = ({
   ref,
   item,
-  index,
+  index: _index,
   isSelected,
-  onClick,
+  onClick: _onClick,
 }: TranscriptEventRowProps & { ref?: React.Ref<HTMLDivElement> }) => {
   const [expanded, setExpanded] = useState(false);
   const color = getEventColor(item);
