@@ -6,7 +6,7 @@
 
 ## 任务 1 — [P0] 空闲后列表数据陈旧
 
-**关联 issue**：[#951](https://github.com/multica-ai/multica/issues/951)
+**关联 issue**：[#951](https://github.com/charlesanim/multica/issues/951)
 
 ### 问题
 

@@ -40,7 +40,7 @@ win:
   artifactName: ${name}-${version}-setup.${ext}
 publish:
   provider: github
-  owner: multica-ai
+  owner: charlesanim
   repo: multica
   # Align with our CLI release flow which pre-creates a *published* GitHub
   # Release via `gh release create`. The electron-builder default of

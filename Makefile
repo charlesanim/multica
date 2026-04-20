@@ -69,7 +69,7 @@ selfhost:
 		echo "Log in with any email + verification code: 888888"; \
 		echo ""; \
 		echo "Next — install the CLI and connect your machine:"; \
-		echo "  brew install multica-ai/tap/multica"; \
+		echo "  brew install charlesanim/tap/multica"; \
 		echo "  multica setup self-host"; \
 	else \
 		echo ""; \
