@@ -2,30 +2,41 @@
 #
 # Usage:
 #   1. Generate a Tailscale auth key at https://login.tailscale.com/admin/settings/keys
-#   2. Add TS_AUTHKEY=tskey-auth-... to your .env
-#   3. Start with:
-#      docker compose -f docker-compose.yml -f docker-compose.tailscale.yml up -d
+#      (check "Reusable" for convenience)
+#   2. Add to your .env:
+#        TS_AUTHKEY=tskey-auth-...
+#        TS_HOSTNAME=hub           # pick any name — this is how it appears on your tailnet
+#   3. Start:
+#        docker compose -f docker-compose.yml -f docker-compose.tailscale.yml up -d
+#   4. Access from any Tailscale device:
+#        https://<TS_HOSTNAME>.<tailnet>.ts.net  (HTTPS, auto-cert via Tailscale Serve)
 #
-# The stack will appear as "multica" on your tailnet. Access from any
-# Tailscale device at http://multica:3000 (web) or http://multica:8080 (API).
+# Security:
+#   - Only your Tailscale devices can reach this. It is invisible to the public internet.
+#   - HTTPS is enabled via Tailscale Serve with auto-provisioned TLS certificates.
+#   - The hostname is configurable so it's not obvious what the service is.
 
 services:
   tailscale:
     image: tailscale/tailscale:latest
-    hostname: multica
+    hostname: ${TS_HOSTNAME:-hub}
     environment:
       TS_AUTHKEY: ${TS_AUTHKEY}
       TS_STATE_DIR: /var/lib/tailscale
       TS_USERSPACE: "false"
+      TS_SERVE_CONFIG: /config/serve.json
+      TS_EXTRA_ARGS: --advertise-tags=tag:container
     volumes:
       - tailscale-state:/var/lib/tailscale
+      - ./docker/tailscale-serve.json:/config/serve.json:ro
     devices:
       - /dev/net/tun:/dev/net/tun
     cap_add:
       - net_admin
     restart: unless-stopped
 
-  # Override backend to share Tailscale's network instead of exposing host ports
+  # Override backend to share Tailscale's network instead of exposing host ports.
+  # Internal ports: backend listens on 4900, frontend on 4800 (non-standard).
   backend:
     network_mode: service:tailscale
     ports: !reset []
@@ -35,15 +46,21 @@ services:
       tailscale:
         condition: service_started
     environment:
-      PORT: 8080
+      PORT: 4900
       DATABASE_URL: postgres://${POSTGRES_USER:-multica}:${POSTGRES_PASSWORD:-multica}@postgres:5432/${POSTGRES_DB:-multica}?sslmode=disable
       JWT_SECRET: ${JWT_SECRET}
       MULTICA_LOCAL_MODE: ${MULTICA_LOCAL_MODE:-false}
       MULTICA_LOCAL_EMAIL: ${MULTICA_LOCAL_EMAIL:-local@localhost}
-      FRONTEND_ORIGIN: http://multica:3000
-      CORS_ALLOWED_ORIGINS: http://multica:3000,http://multica:${FRONTEND_PORT:-3000}
-      MULTICA_APP_URL: http://multica:3000
-      MULTICA_SERVER_URL: ws://multica:8080/ws
+      FRONTEND_ORIGIN: https://${TS_HOSTNAME:-hub}.${TS_TAILNET:-tail8d788f.ts.net}
+      CORS_ALLOWED_ORIGINS: https://${TS_HOSTNAME:-hub}.${TS_TAILNET:-tail8d788f.ts.net}
+      MULTICA_APP_URL: https://${TS_HOSTNAME:-hub}.${TS_TAILNET:-tail8d788f.ts.net}
+      MULTICA_SERVER_URL: wss://${TS_HOSTNAME:-hub}.${TS_TAILNET:-tail8d788f.ts.net}/ws
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:4900/health || exit 1"]
+      interval: 5s
+      timeout: 5s
+      start_period: 10s
+      retries: 5
 
   # Override frontend to share Tailscale's network
   frontend:
@@ -54,6 +71,18 @@ services:
         condition: service_healthy
       tailscale:
         condition: service_started
+    build:
+      context: .
+      dockerfile: apps/web/Dockerfile
+      args:
+        REMOTE_API_URL: http://127.0.0.1:4900
+        NEXT_PUBLIC_API_URL: ""
+        NEXT_PUBLIC_WS_URL: ""
+        NEXT_PUBLIC_LOCAL_MODE: ${NEXT_PUBLIC_LOCAL_MODE:-false}
+    environment:
+      REMOTE_API_URL: http://127.0.0.1:4900
+      PORT: 4800
+      NEXT_PUBLIC_LOCAL_MODE: ${NEXT_PUBLIC_LOCAL_MODE:-false}
 
 volumes:
   tailscale-state:
