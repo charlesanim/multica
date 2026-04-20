@@ -174,11 +174,17 @@ func (h *Handler) notifyAgentAboutPR(r *http.Request, ws db.Workspace, prNumber 
 
 	// Strategy 1: Search issues for a comment containing the PR URL.
 	prURL := fmt.Sprintf("/pull/%d", prNumber)
-	issues, err := h.Queries.SearchIssuesByCommentContent(r.Context(), ws.ID, "%"+prURL+"%")
+	issues, err := h.Queries.SearchIssuesByCommentContent(r.Context(), db.SearchIssuesByCommentContentParams{
+		WorkspaceID: ws.ID,
+		Content:     "%" + prURL + "%",
+	})
 	if err != nil || len(issues) == 0 {
 		// Strategy 2: Search by branch name pattern (agent/<name>/<task-id>).
 		if branchName != "" {
-			issues, err = h.Queries.SearchIssuesByCommentContent(r.Context(), ws.ID, "%"+branchName+"%")
+			issues, err = h.Queries.SearchIssuesByCommentContent(r.Context(), db.SearchIssuesByCommentContentParams{
+				WorkspaceID: ws.ID,
+				Content:     "%" + branchName + "%",
+			})
 		}
 	}
 	if err != nil || len(issues) == 0 {

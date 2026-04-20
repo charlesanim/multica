@@ -33,6 +33,7 @@ type AgentResponse struct {
 	McpConfig          json.RawMessage   `json:"mcp_config"`
 	CustomEnvRedacted  bool              `json:"custom_env_redacted"`
 	McpConfigRedacted  bool              `json:"mcp_config_redacted"`
+	Model              string            `json:"model"`
 	Visibility         string            `json:"visibility"`
 	Status             string            `json:"status"`
 	MaxConcurrentTasks int32             `json:"max_concurrent_tasks"`
@@ -91,6 +92,7 @@ func agentToResponse(a db.Agent) AgentResponse {
 		CustomEnv:          customEnv,
 		CustomArgs:         customArgs,
 		McpConfig:          mcpConfig,
+		Model:              a.Model,
 		Visibility:         a.Visibility,
 		Status:             a.Status,
 		MaxConcurrentTasks: a.MaxConcurrentTasks,
@@ -140,6 +142,7 @@ type TaskAgentData struct {
 	ID           string                   `json:"id"`
 	Name         string                   `json:"name"`
 	Instructions string                   `json:"instructions"`
+	Model        string                   `json:"model,omitempty"`
 	Skills       []service.AgentSkillData `json:"skills,omitempty"`
 	CustomEnv    map[string]string        `json:"custom_env,omitempty"`
 	CustomArgs   []string                 `json:"custom_args,omitempty"`
@@ -263,6 +266,7 @@ type CreateAgentRequest struct {
 	CustomEnv          map[string]string `json:"custom_env"`
 	CustomArgs         []string          `json:"custom_args"`
 	McpConfig          json.RawMessage   `json:"mcp_config"`
+	Model              string            `json:"model"`
 	Visibility         string            `json:"visibility"`
 	MaxConcurrentTasks int32             `json:"max_concurrent_tasks"`
 }
@@ -362,6 +366,7 @@ func (h *Handler) CreateAgent(w http.ResponseWriter, r *http.Request) {
 		CustomEnv:          ce,
 		CustomArgs:         ca,
 		McpConfig:          mc,
+		Model:              req.Model,
 	})
 	if err != nil {
 		// Unique constraint on (workspace_id, name) — return a clear conflict error
@@ -398,6 +403,7 @@ type UpdateAgentRequest struct {
 	CustomEnv          *map[string]string `json:"custom_env"`
 	CustomArgs         *[]string          `json:"custom_args"`
 	McpConfig          *json.RawMessage   `json:"mcp_config"`
+	Model              *string            `json:"model"`
 	Visibility         *string            `json:"visibility"`
 	Status             *string            `json:"status"`
 	MaxConcurrentTasks *int32             `json:"max_concurrent_tasks"`
@@ -522,6 +528,9 @@ func (h *Handler) UpdateAgent(w http.ResponseWriter, r *http.Request) {
 	}
 	if req.MaxConcurrentTasks != nil {
 		params.MaxConcurrentTasks = pgtype.Int4{Int32: *req.MaxConcurrentTasks, Valid: true}
+	}
+	if req.Model != nil {
+		params.Model = pgtype.Text{String: *req.Model, Valid: true}
 	}
 
 	agent, err = h.Queries.UpdateAgent(r.Context(), params)

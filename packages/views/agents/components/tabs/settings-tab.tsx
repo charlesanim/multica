@@ -41,6 +41,7 @@ export function SettingsTab({
 }) {
   const [name, setName] = useState(agent.name);
   const [description, setDescription] = useState(agent.description ?? "");
+  const [model, setModel] = useState(agent.model ?? "");
   const [visibility, setVisibility] = useState<AgentVisibility>(agent.visibility);
   const [maxTasks, setMaxTasks] = useState(agent.max_concurrent_tasks);
   const [selectedRuntimeId, setSelectedRuntimeId] = useState(agent.runtime_id);
@@ -88,6 +89,7 @@ export function SettingsTab({
   const dirty =
     name !== agent.name ||
     description !== (agent.description ?? "") ||
+    model !== (agent.model ?? "") ||
     visibility !== agent.visibility ||
     maxTasks !== agent.max_concurrent_tasks ||
     selectedRuntimeId !== agent.runtime_id;
@@ -103,6 +105,7 @@ export function SettingsTab({
       await onSave({
         name: name.trim(),
         description,
+        model,
         visibility,
         max_concurrent_tasks: maxTasks,
         runtime_id: selectedRuntimeId,
@@ -165,6 +168,19 @@ export function SettingsTab({
           placeholder="What does this agent do?"
           className="mt-1"
         />
+      </div>
+
+      <div>
+        <Label className="text-xs text-muted-foreground">Model</Label>
+        <Input
+          value={model}
+          onChange={(e) => setModel(e.target.value)}
+          placeholder="Leave blank to use runtime default"
+          className="mt-1"
+        />
+        <p className="mt-1 text-xs text-muted-foreground">
+          e.g. o3, claude-sonnet-4-20250514, gpt-4.1
+        </p>
       </div>
 
       <div>
