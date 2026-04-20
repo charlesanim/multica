@@ -14,6 +14,7 @@ import type {
   UpdateAgentRequest,
   AgentTask,
   AgentRuntime,
+  RuntimeDevice,
   InboxItem,
   IssueSubscriber,
   Comment,
@@ -441,6 +442,13 @@ export class ApiClient {
 
   async deleteRuntime(runtimeId: string): Promise<void> {
     await this.fetch(`/api/runtimes/${runtimeId}`, { method: "DELETE" });
+  }
+
+  async updateRuntimeModels(runtimeId: string, models: { label: string; value: string }[]): Promise<RuntimeDevice> {
+    return this.fetch(`/api/runtimes/${runtimeId}/models`, {
+      method: "PUT",
+      body: JSON.stringify({ available_models: models }),
+    });
   }
 
   async getRuntimeUsage(runtimeId: string, params?: { days?: number }): Promise<RuntimeUsage[]> {

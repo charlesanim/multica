@@ -1,15 +1,17 @@
 "use client";
 
 import { useState } from "react";
-import { Trash2 } from "lucide-react";
+import { Trash2, Plus, X, Save, Loader2 } from "lucide-react";
 import { toast } from "sonner";
-import { useQuery } from "@tanstack/react-query";
-import type { AgentRuntime } from "@multica/core/types";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
+import type { AgentRuntime, ModelOption } from "@multica/core/types";
 import { useAuthStore } from "@multica/core/auth";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { memberListOptions } from "@multica/core/workspace/queries";
 import { useDeleteRuntime } from "@multica/core/runtimes/mutations";
+import { api } from "@multica/core/api";
 import { Button } from "@multica/ui/components/ui/button";
+import { Input } from "@multica/ui/components/ui/input";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -172,6 +174,11 @@ export function RuntimeDetail({ runtime }: { runtime: AgentRuntime }) {
           <PingSection runtimeId={runtime.id} />
         </div>
 
+        {/* Models */}
+        {(isAdmin || isRuntimeOwner) && (
+          <ModelsSection runtime={runtime} />
+        )}
+
         {/* Usage */}
         <div>
           <h3 className="text-xs font-medium text-muted-foreground mb-3">
@@ -228,6 +235,120 @@ export function RuntimeDetail({ runtime }: { runtime: AgentRuntime }) {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+    </div>
+  );
+}
+
+function ModelsSection({ runtime }: { runtime: AgentRuntime }) {
+  const wsId = useWorkspaceId();
+  const qc = useQueryClient();
+  const [models, setModels] = useState<ModelOption[]>(runtime.available_models ?? []);
+  const [newLabel, setNewLabel] = useState("");
+  const [newValue, setNewValue] = useState("");
+  const [saving, setSaving] = useState(false);
+
+  const dirty = JSON.stringify(models) !== JSON.stringify(runtime.available_models ?? []);
+
+  const addModel = () => {
+    const label = newLabel.trim();
+    const value = newValue.trim();
+    if (!label || !value) {
+      toast.error("Both label and model ID are required");
+      return;
+    }
+    if (models.some((m) => m.value === value)) {
+      toast.error("Model ID already exists");
+      return;
+    }
+    setModels([...models, { label, value }]);
+    setNewLabel("");
+    setNewValue("");
+  };
+
+  const removeModel = (value: string) => {
+    setModels(models.filter((m) => m.value !== value));
+  };
+
+  const handleSave = async () => {
+    setSaving(true);
+    try {
+      await api.updateRuntimeModels(runtime.id, models);
+      qc.invalidateQueries({ queryKey: ["runtimes", wsId] });
+      toast.success("Models updated");
+    } catch {
+      toast.error("Failed to update models");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div>
+      <h3 className="text-xs font-medium text-muted-foreground mb-3">
+        Available Models
+      </h3>
+      <div className="space-y-2">
+        {models.map((m) => (
+          <div
+            key={m.value}
+            className="flex items-center gap-2 rounded-lg border bg-background px-3 py-2 text-sm"
+          >
+            <div className="min-w-0 flex-1">
+              <span className="font-medium">{m.label}</span>
+              <span className="ml-2 text-xs text-muted-foreground">{m.value}</span>
+            </div>
+            <button
+              type="button"
+              onClick={() => removeModel(m.value)}
+              className="shrink-0 text-muted-foreground hover:text-destructive transition-colors"
+            >
+              <X className="h-3.5 w-3.5" />
+            </button>
+          </div>
+        ))}
+
+        {models.length === 0 && (
+          <p className="text-xs text-muted-foreground py-2">
+            No models configured. Agents using this runtime will use the provider&apos;s default model.
+          </p>
+        )}
+
+        <div className="flex items-end gap-2 pt-1">
+          <div className="flex-1 space-y-1">
+            <Input
+              value={newLabel}
+              onChange={(e) => setNewLabel(e.target.value)}
+              placeholder="Display name (e.g. Claude Sonnet 4)"
+              className="h-8 text-xs"
+            />
+          </div>
+          <div className="flex-1 space-y-1">
+            <Input
+              value={newValue}
+              onChange={(e) => setNewValue(e.target.value)}
+              placeholder="Model ID (e.g. claude-sonnet-4-20250514)"
+              className="h-8 text-xs"
+              onKeyDown={(e) => { if (e.key === "Enter") addModel(); }}
+            />
+          </div>
+          <Button
+            size="sm"
+            variant="outline"
+            className="h-8 shrink-0"
+            onClick={addModel}
+            disabled={!newLabel.trim() || !newValue.trim()}
+          >
+            <Plus className="h-3.5 w-3.5" />
+          </Button>
+        </div>
+
+        {dirty && (
+          <Button onClick={handleSave} disabled={saving} size="sm" className="mt-2">
+            {saving ? <Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin" /> : <Save className="h-3.5 w-3.5 mr-1.5" />}
+            Save Models
+          </Button>
+        )}
+      </div>
     </div>
   );
 }

@@ -132,3 +132,9 @@ WHERE status = 'offline'
   AND last_seen_at < now() - make_interval(secs => @stale_seconds::double precision)
   AND id NOT IN (SELECT DISTINCT runtime_id FROM agent)
 RETURNING id, workspace_id;
+
+-- name: UpdateRuntimeAvailableModels :one
+UPDATE agent_runtime
+SET available_models = $2, updated_at = now()
+WHERE id = $1
+RETURNING *;

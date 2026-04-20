@@ -15,20 +15,21 @@ import (
 )
 
 type AgentRuntimeResponse struct {
-	ID           string  `json:"id"`
-	WorkspaceID  string  `json:"workspace_id"`
-	DaemonID     *string `json:"daemon_id"`
-	Name         string  `json:"name"`
-	RuntimeMode  string  `json:"runtime_mode"`
-	Provider     string  `json:"provider"`
-	LaunchHeader string  `json:"launch_header"`
-	Status       string  `json:"status"`
-	DeviceInfo   string  `json:"device_info"`
-	Metadata     any     `json:"metadata"`
-	OwnerID      *string `json:"owner_id"`
-	LastSeenAt   *string `json:"last_seen_at"`
-	CreatedAt    string  `json:"created_at"`
-	UpdatedAt    string  `json:"updated_at"`
+	ID              string            `json:"id"`
+	WorkspaceID     string            `json:"workspace_id"`
+	DaemonID        *string           `json:"daemon_id"`
+	Name            string            `json:"name"`
+	RuntimeMode     string            `json:"runtime_mode"`
+	Provider        string            `json:"provider"`
+	LaunchHeader    string            `json:"launch_header"`
+	Status          string            `json:"status"`
+	DeviceInfo      string            `json:"device_info"`
+	Metadata        any               `json:"metadata"`
+	AvailableModels json.RawMessage   `json:"available_models"`
+	OwnerID         *string           `json:"owner_id"`
+	LastSeenAt      *string           `json:"last_seen_at"`
+	CreatedAt       string            `json:"created_at"`
+	UpdatedAt       string            `json:"updated_at"`
 }
 
 func runtimeToResponse(rt db.AgentRuntime) AgentRuntimeResponse {
@@ -40,21 +41,30 @@ func runtimeToResponse(rt db.AgentRuntime) AgentRuntimeResponse {
 		metadata = map[string]any{}
 	}
 
+	var availableModels json.RawMessage
+	if rt.AvailableModels != nil {
+		availableModels = json.RawMessage(rt.AvailableModels)
+	}
+	if availableModels == nil {
+		availableModels = json.RawMessage("[]")
+	}
+
 	return AgentRuntimeResponse{
-		ID:           uuidToString(rt.ID),
-		WorkspaceID:  uuidToString(rt.WorkspaceID),
-		DaemonID:     textToPtr(rt.DaemonID),
-		Name:         rt.Name,
-		RuntimeMode:  rt.RuntimeMode,
-		Provider:     rt.Provider,
-		LaunchHeader: agent.LaunchHeader(rt.Provider),
-		Status:       rt.Status,
-		DeviceInfo:   rt.DeviceInfo,
-		Metadata:     metadata,
-		OwnerID:      uuidToPtr(rt.OwnerID),
-		LastSeenAt:   timestampToPtr(rt.LastSeenAt),
-		CreatedAt:    timestampToString(rt.CreatedAt),
-		UpdatedAt:    timestampToString(rt.UpdatedAt),
+		ID:              uuidToString(rt.ID),
+		WorkspaceID:     uuidToString(rt.WorkspaceID),
+		DaemonID:        textToPtr(rt.DaemonID),
+		Name:            rt.Name,
+		RuntimeMode:     rt.RuntimeMode,
+		Provider:        rt.Provider,
+		LaunchHeader:    agent.LaunchHeader(rt.Provider),
+		Status:          rt.Status,
+		DeviceInfo:      rt.DeviceInfo,
+		Metadata:        metadata,
+		AvailableModels: availableModels,
+		OwnerID:         uuidToPtr(rt.OwnerID),
+		LastSeenAt:      timestampToPtr(rt.LastSeenAt),
+		CreatedAt:       timestampToString(rt.CreatedAt),
+		UpdatedAt:       timestampToString(rt.UpdatedAt),
 	}
 }
 
@@ -328,4 +338,55 @@ func (h *Handler) DeleteAgentRuntime(w http.ResponseWriter, r *http.Request) {
 	})
 
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+}
+
+// UpdateRuntimeModels updates the available_models list for a runtime.
+func (h *Handler) UpdateRuntimeModels(w http.ResponseWriter, r *http.Request) {
+	runtimeID := chi.URLParam(r, "runtimeId")
+
+	rt, err := h.Queries.GetAgentRuntime(r.Context(), parseUUID(runtimeID))
+	if err != nil {
+		writeError(w, http.StatusNotFound, "runtime not found")
+		return
+	}
+
+	wsID := uuidToString(rt.WorkspaceID)
+	member, ok := h.requireWorkspaceMember(w, r, wsID, "runtime not found")
+	if !ok {
+		return
+	}
+
+	userID := uuidToString(member.UserID)
+	isAdmin := roleAllowed(member.Role, "owner", "admin")
+	isOwner := rt.OwnerID.Valid && uuidToString(rt.OwnerID) == userID
+	if !isAdmin && !isOwner {
+		writeError(w, http.StatusForbidden, "you can only update your own runtimes")
+		return
+	}
+
+	var req struct {
+		AvailableModels json.RawMessage `json:"available_models"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	if req.AvailableModels == nil {
+		req.AvailableModels = json.RawMessage("[]")
+	}
+
+	updated, err := h.Queries.UpdateRuntimeAvailableModels(r.Context(), db.UpdateRuntimeAvailableModelsParams{
+		ID:              rt.ID,
+		AvailableModels: req.AvailableModels,
+	})
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to update models")
+		return
+	}
+
+	resp := runtimeToResponse(updated)
+	h.publish(protocol.EventDaemonRegister, wsID, "member", userID, map[string]any{
+		"action": "update",
+	})
+	writeJSON(w, http.StatusOK, resp)
 }

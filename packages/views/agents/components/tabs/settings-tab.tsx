@@ -8,8 +8,9 @@ import {
   Lock,
   Camera,
   ChevronDown,
+  Check,
 } from "lucide-react";
-import type { Agent, AgentVisibility, RuntimeDevice, MemberWithUser } from "@multica/core/types";
+import type { Agent, AgentVisibility, RuntimeDevice, MemberWithUser, ModelOption } from "@multica/core/types";
 import {
   Popover,
   PopoverTrigger,
@@ -23,6 +24,11 @@ import { api } from "@multica/core/api";
 import { useFileUpload } from "@multica/core/hooks/use-file-upload";
 import { ActorAvatar } from "../../../common/actor-avatar";
 import { ProviderLogo } from "../../../runtimes/components/provider-logo";
+
+function getModelsFromRuntime(runtime: RuntimeDevice | null): ModelOption[] {
+  if (!runtime?.available_models) return [];
+  return runtime.available_models;
+}
 
 type RuntimeFilter = "mine" | "all";
 
@@ -42,6 +48,8 @@ export function SettingsTab({
   const [name, setName] = useState(agent.name);
   const [description, setDescription] = useState(agent.description ?? "");
   const [model, setModel] = useState(agent.model ?? "");
+  const [modelOpen, setModelOpen] = useState(false);
+  const [customModel, setCustomModel] = useState("");
   const [visibility, setVisibility] = useState<AgentVisibility>(agent.visibility);
   const [maxTasks, setMaxTasks] = useState(agent.max_concurrent_tasks);
   const [selectedRuntimeId, setSelectedRuntimeId] = useState(agent.runtime_id);
@@ -71,6 +79,16 @@ export function SettingsTab({
 
   const selectedRuntime = runtimes.find((d) => d.id === selectedRuntimeId) ?? null;
   const selectedOwnerMember = selectedRuntime ? getOwnerMember(selectedRuntime.owner_id) : null;
+
+  const providerModels = useMemo(() => {
+    return getModelsFromRuntime(selectedRuntime);
+  }, [selectedRuntime]);
+
+  const selectedModelLabel = useMemo(() => {
+    if (!model) return "Runtime default";
+    const found = providerModels.find((m) => m.value === model);
+    return found?.label ?? model;
+  }, [model, providerModels]);
 
   const handleAvatarUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -172,15 +190,75 @@ export function SettingsTab({
 
       <div>
         <Label className="text-xs text-muted-foreground">Model</Label>
-        <Input
-          value={model}
-          onChange={(e) => setModel(e.target.value)}
-          placeholder="Leave blank to use runtime default"
-          className="mt-1"
-        />
-        <p className="mt-1 text-xs text-muted-foreground">
-          e.g. o3, claude-sonnet-4-20250514, gpt-4.1
-        </p>
+        <Popover open={modelOpen} onOpenChange={setModelOpen}>
+          <PopoverTrigger
+            className="flex w-full items-center justify-between rounded-lg border border-border bg-background px-3 py-2.5 mt-1.5 text-left text-sm transition-colors hover:bg-muted"
+          >
+            <span className={model ? "font-medium" : "text-muted-foreground"}>
+              {selectedModelLabel}
+            </span>
+            <ChevronDown className={`h-4 w-4 shrink-0 text-muted-foreground transition-transform ${modelOpen ? "rotate-180" : ""}`} />
+          </PopoverTrigger>
+          <PopoverContent align="start" className="w-[var(--anchor-width)] p-1 max-h-72 overflow-y-auto">
+            <button
+              onClick={() => { setModel(""); setModelOpen(false); }}
+              className={`flex w-full items-center gap-2 rounded-md px-3 py-2 text-left text-sm transition-colors ${
+                !model ? "bg-accent" : "hover:bg-accent/50"
+              }`}
+            >
+              <span className="flex-1 text-muted-foreground italic">Runtime default</span>
+              {!model && <Check className="h-3.5 w-3.5 shrink-0 text-primary" />}
+            </button>
+            {providerModels.length > 0 && (
+              <div className="my-1 border-t border-border" />
+            )}
+            {providerModels.map((m) => (
+              <button
+                key={m.value}
+                onClick={() => { setModel(m.value); setModelOpen(false); }}
+                className={`flex w-full items-center gap-2 rounded-md px-3 py-2 text-left text-sm transition-colors ${
+                  model === m.value ? "bg-accent" : "hover:bg-accent/50"
+                }`}
+              >
+                <span className="flex-1 font-medium">{m.label}</span>
+                {model === m.value && <Check className="h-3.5 w-3.5 shrink-0 text-primary" />}
+              </button>
+            ))}
+            <div className="my-1 border-t border-border" />
+            <div className="px-1 py-1">
+              <div className="flex items-center gap-1.5">
+                <Input
+                  value={customModel}
+                  onChange={(e) => setCustomModel(e.target.value)}
+                  placeholder="Custom model ID…"
+                  className="h-8 text-xs"
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" && customModel.trim()) {
+                      setModel(customModel.trim());
+                      setCustomModel("");
+                      setModelOpen(false);
+                    }
+                  }}
+                />
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  className="h-8 px-2 text-xs shrink-0"
+                  disabled={!customModel.trim()}
+                  onClick={() => {
+                    if (customModel.trim()) {
+                      setModel(customModel.trim());
+                      setCustomModel("");
+                      setModelOpen(false);
+                    }
+                  }}
+                >
+                  Use
+                </Button>
+              </div>
+            </div>
+          </PopoverContent>
+        </Popover>
       </div>
 
       <div>

@@ -4,6 +4,11 @@ export type AgentRuntimeMode = "local" | "cloud";
 
 export type AgentVisibility = "workspace" | "private";
 
+export interface ModelOption {
+  label: string;
+  value: string;
+}
+
 export interface RuntimeDevice {
   id: string;
   workspace_id: string;
@@ -15,6 +20,7 @@ export interface RuntimeDevice {
   status: "online" | "offline";
   device_info: string;
   metadata: Record<string, unknown>;
+  available_models: ModelOption[];
   owner_id: string | null;
   last_seen_at: string | null;
   created_at: string;
