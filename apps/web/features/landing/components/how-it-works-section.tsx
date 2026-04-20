@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useAuthStore } from "@/features/auth";
+import { useAuthStore } from "@multica/core/auth";
 import { useLocale } from "../i18n";
 import { GitHubMark, githubUrl, heroButtonClassName } from "./shared";
 
@@ -41,7 +41,7 @@ export function HowItWorksSection() {
         </div>
 
         <div className="mt-14 flex flex-wrap items-center gap-4">
-          <Link href={user ? "/issues" : "/login"} className={heroButtonClassName("solid")}>
+          <Link href={user ? "/" : "/login"} className={heroButtonClassName("solid")}>
             {user ? t.header.dashboard : t.howItWorks.cta}
           </Link>
           <Link

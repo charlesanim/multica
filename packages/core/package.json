@@ -3,6 +3,11 @@
   "version": "0.0.0",
   "private": true,
   "type": "module",
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint .",
+    "test": "vitest run"
+  },
   "exports": {
     ".": "./index.ts",
     "./types": "./types/index.ts",
@@ -10,6 +15,7 @@
     "./api": "./api/index.ts",
     "./api/client": "./api/client.ts",
     "./api/ws-client": "./api/ws-client.ts",
+    "./config": "./config/index.ts",
     "./auth": "./auth/index.ts",
     "./workspace": "./workspace/index.ts",
     "./workspace/queries": "./workspace/queries.ts",
@@ -29,6 +35,9 @@
     "./inbox/queries": "./inbox/queries.ts",
     "./inbox/mutations": "./inbox/mutations.ts",
     "./inbox/ws-updaters": "./inbox/ws-updaters.ts",
+    "./chat": "./chat/index.ts",
+    "./chat/queries": "./chat/queries.ts",
+    "./chat/mutations": "./chat/mutations.ts",
     "./runtimes": "./runtimes/index.ts",
     "./runtimes/queries": "./runtimes/queries.ts",
     "./runtimes/mutations": "./runtimes/mutations.ts",
@@ -37,16 +46,24 @@
     "./projects/queries": "./projects/queries.ts",
     "./projects/mutations": "./projects/mutations.ts",
     "./projects/config": "./projects/config.ts",
+    "./autopilots": "./autopilots/index.ts",
+    "./autopilots/queries": "./autopilots/queries.ts",
+    "./autopilots/mutations": "./autopilots/mutations.ts",
+    "./pins": "./pins/index.ts",
+    "./pins/queries": "./pins/queries.ts",
+    "./pins/mutations": "./pins/mutations.ts",
     "./realtime": "./realtime/index.ts",
     "./navigation": "./navigation/index.ts",
     "./modals": "./modals/index.ts",
+    "./paths": "./paths/index.ts",
     "./hooks": "./hooks.tsx",
     "./hooks/*": "./hooks/*.ts",
     "./query-client": "./query-client.ts",
     "./provider": "./provider.tsx",
     "./logger": "./logger.ts",
     "./utils": "./utils.ts",
-    "./constants/*": "./constants/*.ts"
+    "./constants/*": "./constants/*.ts",
+    "./platform": "./platform/index.ts"
   },
   "dependencies": {
     "@tanstack/react-query": "catalog:",
@@ -59,6 +76,7 @@
   "devDependencies": {
     "@multica/tsconfig": "workspace:*",
     "@types/react": "catalog:",
-    "typescript": "catalog:"
+    "typescript": "catalog:",
+    "vitest": "catalog:"
   }
 }

@@ -2,6 +2,7 @@ package handler
 
 import (
 	"context"
+	"errors"
 	"crypto/rand"
 	"crypto/subtle"
 	"encoding/binary"
@@ -21,6 +22,18 @@ import (
 	"github.com/multica-ai/multica/server/internal/logger"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
+
+// SignupError represents signup restriction errors
+type SignupError struct {
+	Message string
+}
+
+func (e SignupError) Error() string {
+	return e.Message
+}
+
+var ErrSignupProhibited = SignupError{Message: "user registration is disabled on this self-hosted instance"}
+var ErrEmailNotAllowed = SignupError{Message: "email address or domain not allowed on this instance"}
 
 type UserResponse struct {
 	ID        string  `json:"id"`
@@ -56,117 +69,6 @@ type VerifyCodeRequest struct {
 	Code  string `json:"code"`
 }
 
-type LocalLoginRequest struct {
-	Email string `json:"email"`
-}
-
-func defaultWorkspaceName(user db.User) string {
-	name := strings.TrimSpace(user.Name)
-	if name == "" {
-		email := strings.TrimSpace(user.Email)
-		if at := strings.Index(email, "@"); at > 0 {
-			name = email[:at]
-		}
-	}
-	if name == "" {
-		name = "Personal"
-	}
-	return name + "'s Workspace"
-}
-
-func slugifyWorkspacePart(value string) string {
-	value = strings.ToLower(strings.TrimSpace(value))
-	var b strings.Builder
-	lastWasDash := false
-
-	for _, r := range value {
-		switch {
-		case r >= 'a' && r <= 'z', r >= '0' && r <= '9':
-			b.WriteRune(r)
-			lastWasDash = false
-		case b.Len() > 0 && !lastWasDash:
-			b.WriteByte('-')
-			lastWasDash = true
-		}
-	}
-
-	return strings.Trim(b.String(), "-")
-}
-
-func defaultWorkspaceSlug(user db.User) string {
-	candidates := []string{
-		slugifyWorkspacePart(user.Name),
-		slugifyWorkspacePart(strings.Split(strings.TrimSpace(user.Email), "@")[0]),
-		"workspace",
-	}
-
-	base := "workspace"
-	for _, candidate := range candidates {
-		if candidate != "" {
-			base = candidate
-			break
-		}
-	}
-
-	userID := uuidToString(user.ID)
-	if len(userID) >= 8 {
-		return base + "-" + userID[:8]
-	}
-	return base
-}
-
-func (h *Handler) ensureUserWorkspace(ctx context.Context, user db.User) error {
-	workspaces, err := h.Queries.ListWorkspaces(ctx, user.ID)
-	if err != nil {
-		return err
-	}
-	if len(workspaces) > 0 {
-		return nil
-	}
-
-	tx, err := h.TxStarter.Begin(ctx)
-	if err != nil {
-		return err
-	}
-	defer tx.Rollback(ctx)
-
-	qtx := h.Queries.WithTx(tx)
-	workspaces, err = qtx.ListWorkspaces(ctx, user.ID)
-	if err != nil {
-		return err
-	}
-	if len(workspaces) > 0 {
-		return nil
-	}
-
-	wsName := defaultWorkspaceName(user)
-	workspace, err := qtx.CreateWorkspace(ctx, db.CreateWorkspaceParams{
-		Name:        wsName,
-		Slug:        defaultWorkspaceSlug(user),
-		Description: pgtype.Text{},
-		IssuePrefix: generateIssuePrefix(wsName),
-	})
-	if err != nil {
-		if isUniqueViolation(err) {
-			workspaces, lookupErr := h.Queries.ListWorkspaces(ctx, user.ID)
-			if lookupErr == nil && len(workspaces) > 0 {
-				return nil
-			}
-		}
-		return err
-	}
-
-	if _, err := qtx.CreateMember(ctx, db.CreateMemberParams{
-		WorkspaceID: workspace.ID,
-		UserID:      user.ID,
-		Role:        "owner",
-	}); err != nil {
-		return err
-	}
-
-	return tx.Commit(ctx)
-}
-
 func generateCode() (string, error) {
 	var buf [4]byte
 	if _, err := rand.Read(buf[:]); err != nil {
@@ -187,41 +89,72 @@ func (h *Handler) issueJWT(user db.User) (string, error) {
 	return token.SignedString(auth.JWTSecret())
 }
 
-func localModeEnabled() bool {
-	if strings.EqualFold(strings.TrimSpace(os.Getenv("APP_ENV")), "production") {
-		return false
-	}
-	v := strings.ToLower(strings.TrimSpace(os.Getenv("MULTICA_LOCAL_MODE")))
-	return v == "1" || v == "true" || v == "yes" || v == "on"
-}
-
-func localLoginDefaultEmail() string {
-	email := strings.ToLower(strings.TrimSpace(os.Getenv("MULTICA_LOCAL_EMAIL")))
-	if email == "" {
-		return "local@localhost"
-	}
-	return email
-}
-
 func (h *Handler) findOrCreateUser(ctx context.Context, email string) (db.User, error) {
 	user, err := h.Queries.GetUserByEmail(ctx, email)
-	if err != nil {
-		if !isNotFound(err) {
-			return db.User{}, err
-		}
-		name := email
-		if at := strings.Index(email, "@"); at > 0 {
-			name = email[:at]
-		}
-		user, err = h.Queries.CreateUser(ctx, db.CreateUserParams{
-			Name:  name,
-			Email: email,
-		})
-		if err != nil {
-			return db.User{}, err
+	isNewUser := isNotFound(err)
+	if err != nil && !isNewUser {
+		return db.User{}, err
+	}
+
+	if err := h.checkSignupAllowed(email, isNewUser); err != nil {
+		return db.User{}, err
+	}
+
+	if !isNewUser {
+		return user, nil
+	}
+
+	name := email
+	if at := strings.Index(email, "@"); at > 0 {
+		name = email[:at]
+	}
+	return h.Queries.CreateUser(ctx, db.CreateUserParams{
+		Name:  name,
+		Email: email,
+	})
+}
+
+func (h *Handler) checkSignupAllowed(email string, isNewUser bool) error {
+	if !isNewUser {
+		return nil // existing users always allowed to log in
+	}
+
+	email = strings.ToLower(email)
+	domain := ""
+	if at := strings.Index(email, "@"); at > 0 {
+		domain = email[at+1:]
+	}
+
+	// 1. explicit email whitelist always wins
+	if len(h.cfg.AllowedEmails) > 0 && contains(h.cfg.AllowedEmails, email) {
+		return nil
+	}
+
+	// 2. domain whitelist always wins
+	if len(h.cfg.AllowedEmailDomains) > 0 && contains(h.cfg.AllowedEmailDomains, domain) {
+		return nil
+	}
+
+	// 3. general signup flag
+	if !h.cfg.AllowSignup {
+		return ErrSignupProhibited
+	}
+
+	// 4. if allowlists are set but didn't match, block
+	if len(h.cfg.AllowedEmailDomains) > 0 || len(h.cfg.AllowedEmails) > 0 {
+		return ErrSignupProhibited
+	}
+
+	return nil
+}
+
+func contains(slice []string, s string) bool {
+	for _, item := range slice {
+		if strings.EqualFold(item, s) {
+			return true
 		}
 	}
-	return user, nil
+	return false
 }
 
 func (h *Handler) SendCode(w http.ResponseWriter, r *http.Request) {
@@ -237,9 +170,43 @@ func (h *Handler) SendCode(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Rate limit: max 1 code per 10 seconds per email
+	// Check signup restrictions before sending magic link
+	_, err := h.Queries.GetUserByEmail(r.Context(), email)
+	if err != nil {
+		if !isNotFound(err) {
+			// Real database/query error → return 500
+			writeError(w, http.StatusInternalServerError, "failed to lookup user")
+			return
+		}
+		// User does not exist → treat as new user
+		isNewUser := true
+		if err := h.checkSignupAllowed(email, isNewUser); err != nil {
+			var signupErr SignupError
+			if errors.As(err, &signupErr) {
+				writeError(w, http.StatusForbidden, signupErr.Error())
+			} else {
+				writeError(w, http.StatusForbidden, "user registration is disabled")
+			}
+			return
+		}
+	} else {
+		// User already exists → always allowed to login
+		isNewUser := false
+		if err := h.checkSignupAllowed(email, isNewUser); err != nil {
+			// This should rarely happen, but handle it anyway
+			var signupErr SignupError
+			if errors.As(err, &signupErr) {
+				writeError(w, http.StatusForbidden, signupErr.Error())
+			} else {
+				writeError(w, http.StatusForbidden, "user registration is disabled")
+			}
+			return
+		}
+	}
+
+	// Rate limit: max 1 code per 60 seconds per email
 	latest, err := h.Queries.GetLatestCodeByEmail(r.Context(), email)
-	if err == nil && time.Since(latest.CreatedAt.Time) < 10*time.Second {
+	if err == nil && time.Since(latest.CreatedAt.Time) < 60*time.Second {
 		writeError(w, http.StatusTooManyRequests, "please wait before requesting another code")
 		return
 	}
@@ -261,6 +228,7 @@ func (h *Handler) SendCode(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := h.EmailService.SendVerificationCode(email, code); err != nil {
+		slog.Error("failed to send verification code", "email", email, "error", err)
 		writeError(w, http.StatusInternalServerError, "failed to send verification code")
 		return
 	}
@@ -306,12 +274,12 @@ func (h *Handler) VerifyCode(w http.ResponseWriter, r *http.Request) {
 
 	user, err := h.findOrCreateUser(r.Context(), email)
 	if err != nil {
+		var signupErr SignupError
+		if errors.As(err, &signupErr) {
+			writeError(w, http.StatusForbidden, signupErr.Error())
+			return
+		}
 		writeError(w, http.StatusInternalServerError, "failed to create user")
-		return
-	}
-
-	if err := h.ensureUserWorkspace(r.Context(), user); err != nil {
-		writeError(w, http.StatusInternalServerError, "failed to provision workspace")
 		return
 	}
 
@@ -322,6 +290,11 @@ func (h *Handler) VerifyCode(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Set HttpOnly auth cookie (browser clients) + CSRF cookie.
+	if err := auth.SetAuthCookies(w, tokenString); err != nil {
+		slog.Warn("failed to set auth cookies", "error", err)
+	}
+
 	// Set CloudFront signed cookies for CDN access.
 	if h.CFSigner != nil {
 		for _, cookie := range h.CFSigner.SignedCookies(time.Now().Add(30 * 24 * time.Hour)) {
@@ -330,54 +303,6 @@ func (h *Handler) VerifyCode(w http.ResponseWriter, r *http.Request) {
 	}
 
 	slog.Info("user logged in", append(logger.RequestAttrs(r), "user_id", uuidToString(user.ID), "email", user.Email)...)
-	writeJSON(w, http.StatusOK, LoginResponse{
-		Token: tokenString,
-		User:  userToResponse(user),
-	})
-}
-
-func (h *Handler) LocalLogin(w http.ResponseWriter, r *http.Request) {
-	if !localModeEnabled() {
-		writeError(w, http.StatusNotFound, "not found")
-		return
-	}
-
-	var req LocalLoginRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil && err != io.EOF {
-		writeError(w, http.StatusBadRequest, "invalid request body")
-		return
-	}
-
-	email := strings.ToLower(strings.TrimSpace(req.Email))
-	if email == "" {
-		email = localLoginDefaultEmail()
-	}
-
-	user, err := h.findOrCreateUser(r.Context(), email)
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "failed to create user")
-		return
-	}
-
-	if err := h.ensureUserWorkspace(r.Context(), user); err != nil {
-		writeError(w, http.StatusInternalServerError, "failed to provision workspace")
-		return
-	}
-
-	tokenString, err := h.issueJWT(user)
-	if err != nil {
-		slog.Warn("local login failed", append(logger.RequestAttrs(r), "error", err, "email", email)...)
-		writeError(w, http.StatusInternalServerError, "failed to generate token")
-		return
-	}
-
-	if h.CFSigner != nil {
-		for _, cookie := range h.CFSigner.SignedCookies(time.Now().Add(30 * 24 * time.Hour)) {
-			http.SetCookie(w, cookie)
-		}
-	}
-
-	slog.Info("user logged in (local mode)", append(logger.RequestAttrs(r), "user_id", uuidToString(user.ID), "email", user.Email)...)
 	writeJSON(w, http.StatusOK, LoginResponse{
 		Token: tokenString,
 		User:  userToResponse(user),
@@ -479,7 +404,12 @@ func (h *Handler) GoogleLogin(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Fetch user info from Google.
-	userInfoReq, _ := http.NewRequestWithContext(r.Context(), http.MethodGet, "https://www.googleapis.com/oauth2/v2/userinfo", nil)
+	userInfoReq, err := http.NewRequestWithContext(r.Context(), http.MethodGet, "https://www.googleapis.com/oauth2/v2/userinfo", nil)
+	if err != nil {
+		slog.Error("failed to create userinfo request", "error", err)
+		writeError(w, http.StatusInternalServerError, "internal error")
+		return
+	}
 	userInfoReq.Header.Set("Authorization", "Bearer "+gToken.AccessToken)
 
 	userInfoResp, err := http.DefaultClient.Do(userInfoReq)
@@ -505,6 +435,11 @@ func (h *Handler) GoogleLogin(w http.ResponseWriter, r *http.Request) {
 
 	user, err := h.findOrCreateUser(r.Context(), email)
 	if err != nil {
+		var signupErr SignupError
+		if errors.As(err, &signupErr) {
+			writeError(w, http.StatusForbidden, signupErr.Error())
+			return
+		}
 		writeError(w, http.StatusInternalServerError, "failed to create user")
 		return
 	}
@@ -535,16 +470,15 @@ func (h *Handler) GoogleLogin(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	if err := h.ensureUserWorkspace(r.Context(), user); err != nil {
-		writeError(w, http.StatusInternalServerError, "failed to provision workspace")
-		return
-	}
-
 	tokenString, err := h.issueJWT(user)
 	if err != nil {
 		slog.Warn("google login failed", append(logger.RequestAttrs(r), "error", err, "email", email)...)
 		writeError(w, http.StatusInternalServerError, "failed to generate token")
 		return
+	}
+
+	if err := auth.SetAuthCookies(w, tokenString); err != nil {
+		slog.Warn("failed to set auth cookies", "error", err)
 	}
 
 	if h.CFSigner != nil {
@@ -558,6 +492,36 @@ func (h *Handler) GoogleLogin(w http.ResponseWriter, r *http.Request) {
 		Token: tokenString,
 		User:  userToResponse(user),
 	})
+}
+
+// IssueCliToken returns a fresh JWT for the authenticated user.
+// This allows cookie-authenticated browser sessions to obtain a bearer token
+// that can be handed off to the CLI via the cli_callback redirect.
+func (h *Handler) IssueCliToken(w http.ResponseWriter, r *http.Request) {
+	userID, ok := requireUserID(w, r)
+	if !ok {
+		return
+	}
+
+	user, err := h.Queries.GetUser(r.Context(), parseUUID(userID))
+	if err != nil {
+		writeError(w, http.StatusNotFound, "user not found")
+		return
+	}
+
+	tokenString, err := h.issueJWT(user)
+	if err != nil {
+		slog.Warn("cli-token: failed to issue JWT", append(logger.RequestAttrs(r), "error", err, "user_id", userID)...)
+		writeError(w, http.StatusInternalServerError, "failed to generate token")
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]string{"token": tokenString})
+}
+
+func (h *Handler) Logout(w http.ResponseWriter, r *http.Request) {
+	auth.ClearAuthCookies(w)
+	writeJSON(w, http.StatusOK, map[string]string{"message": "logged out"})
 }
 
 func (h *Handler) UpdateMe(w http.ResponseWriter, r *http.Request) {
@@ -602,4 +566,69 @@ func (h *Handler) UpdateMe(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSON(w, http.StatusOK, userToResponse(updatedUser))
+}
+
+// --- Local-mode login (self-host only) ---
+
+type LocalLoginRequest struct {
+	Email string `json:"email"`
+}
+
+func localModeEnabled() bool {
+	if strings.EqualFold(strings.TrimSpace(os.Getenv("APP_ENV")), "production") {
+		return false
+	}
+	v := strings.ToLower(strings.TrimSpace(os.Getenv("MULTICA_LOCAL_MODE")))
+	return v == "1" || v == "true" || v == "yes" || v == "on"
+}
+
+func localLoginDefaultEmail() string {
+	email := strings.ToLower(strings.TrimSpace(os.Getenv("MULTICA_LOCAL_EMAIL")))
+	if email == "" {
+		return "local@localhost"
+	}
+	return email
+}
+
+func (h *Handler) LocalLogin(w http.ResponseWriter, r *http.Request) {
+	if !localModeEnabled() {
+		writeError(w, http.StatusNotFound, "not found")
+		return
+	}
+
+	var req LocalLoginRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil && !errors.Is(err, io.EOF) {
+		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+
+	email := strings.ToLower(strings.TrimSpace(req.Email))
+	if email == "" {
+		email = localLoginDefaultEmail()
+	}
+
+	user, err := h.findOrCreateUser(r.Context(), email)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to create user")
+		return
+	}
+
+	tokenString, err := h.issueJWT(user)
+	if err != nil {
+		slog.Warn("local login failed", append(logger.RequestAttrs(r), "error", err, "email", email)...)
+		writeError(w, http.StatusInternalServerError, "failed to generate token")
+		return
+	}
+
+	if h.CFSigner != nil {
+		for _, cookie := range h.CFSigner.SignedCookies(time.Now().Add(30 * 24 * time.Hour)) {
+			http.SetCookie(w, cookie)
+		}
+	}
+
+	slog.Info("user logged in (local mode)", append(logger.RequestAttrs(r), "user_id", uuidToString(user.ID), "email", user.Email)...)
+	writeJSON(w, http.StatusOK, LoginResponse{
+		Token: tokenString,
+		User:  userToResponse(user),
+	})
 }

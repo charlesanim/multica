@@ -222,9 +222,15 @@ type searchResult struct {
 }
 
 // buildSearchQuery builds a dynamic SQL query for issue search.
-// It supports ILIKE matching, identifier search, multi-word search,
-// and refined ranking.
+// It uses LOWER(column) LIKE for case-insensitive matching compatible with pg_bigm 1.2 GIN indexes.
+// Search patterns are lowercased in Go to avoid redundant LOWER() on the pattern side in SQL.
 func buildSearchQuery(phrase string, terms []string, queryNum int, hasNum bool, includeClosed bool) (string, []any) {
+	// Lowercase in Go so SQL only needs LOWER() on the column side.
+	phrase = strings.ToLower(phrase)
+	for i, t := range terms {
+		terms[i] = strings.ToLower(t)
+	}
+
 	// Parameter index tracker
 	argIdx := 1
 	args := []any{}
@@ -242,7 +248,7 @@ func buildSearchQuery(phrase string, terms []string, queryNum int, hasNum bool, 
 
 	wsParam := nextArg(nil) // $2 — workspace_id, will be filled by caller position
 
-	// Build per-term ILIKE conditions only for multi-word search.
+	// Build per-term LIKE conditions only for multi-word search.
 	// For single-word queries, the phrase parameter already covers the term.
 	var termParams []string
 	if len(terms) > 1 {
@@ -257,7 +263,7 @@ func buildSearchQuery(phrase string, terms []string, queryNum int, hasNum bool, 
 
 	// Full phrase match: title, description, or comment
 	phraseMatch := fmt.Sprintf(
-		"(i.title ILIKE %s OR COALESCE(i.description, '') ILIKE %s OR EXISTS (SELECT 1 FROM comment c WHERE c.issue_id = i.id AND c.content ILIKE %s))",
+		"(LOWER(i.title) LIKE %s OR LOWER(COALESCE(i.description, '')) LIKE %s OR EXISTS (SELECT 1 FROM comment c WHERE c.issue_id = i.id AND LOWER(c.content) LIKE %s))",
 		phraseContains, phraseContains, phraseContains,
 	)
 	whereParts = append(whereParts, phraseMatch)
@@ -268,7 +274,7 @@ func buildSearchQuery(phrase string, terms []string, queryNum int, hasNum bool, 
 		for _, tp := range termParams {
 			tc := "'%' || " + tp + " || '%'"
 			termConditions = append(termConditions, fmt.Sprintf(
-				"(i.title ILIKE %s OR COALESCE(i.description, '') ILIKE %s OR EXISTS (SELECT 1 FROM comment c WHERE c.issue_id = i.id AND c.content ILIKE %s))",
+				"(LOWER(i.title) LIKE %s OR LOWER(COALESCE(i.description, '')) LIKE %s OR EXISTS (SELECT 1 FROM comment c WHERE c.issue_id = i.id AND LOWER(c.content) LIKE %s))",
 				tc, tc, tc,
 			))
 		}
@@ -298,31 +304,31 @@ func buildSearchQuery(phrase string, terms []string, queryNum int, hasNum bool, 
 	}
 
 	// Tier 1: Exact title match
-	rankCases = append(rankCases, fmt.Sprintf("WHEN LOWER(i.title) = LOWER(%s) THEN 1", phraseParam))
+	rankCases = append(rankCases, fmt.Sprintf("WHEN LOWER(i.title) = %s THEN 1", phraseParam))
 
 	// Tier 2: Title starts with phrase
-	rankCases = append(rankCases, fmt.Sprintf("WHEN i.title ILIKE %s THEN 2", phraseStartsWith))
+	rankCases = append(rankCases, fmt.Sprintf("WHEN LOWER(i.title) LIKE %s THEN 2", phraseStartsWith))
 
 	// Tier 3: Title contains phrase
-	rankCases = append(rankCases, fmt.Sprintf("WHEN i.title ILIKE %s THEN 3", phraseContains))
+	rankCases = append(rankCases, fmt.Sprintf("WHEN LOWER(i.title) LIKE %s THEN 3", phraseContains))
 
 	// Tier 4: Title matches all words (multi-word only)
 	if len(termParams) > 1 {
 		var titleTerms []string
 		for _, tp := range termParams {
-			titleTerms = append(titleTerms, fmt.Sprintf("i.title ILIKE '%s' || %s || '%s'", "%", tp, "%"))
+			titleTerms = append(titleTerms, fmt.Sprintf("LOWER(i.title) LIKE '%s' || %s || '%s'", "%", tp, "%"))
 		}
 		rankCases = append(rankCases, fmt.Sprintf("WHEN (%s) THEN 4", strings.Join(titleTerms, " AND ")))
 	}
 
 	// Tier 5: Description contains phrase
-	rankCases = append(rankCases, fmt.Sprintf("WHEN COALESCE(i.description, '') ILIKE %s THEN 5", phraseContains))
+	rankCases = append(rankCases, fmt.Sprintf("WHEN LOWER(COALESCE(i.description, '')) LIKE %s THEN 5", phraseContains))
 
 	// Tier 6: Description matches all words (multi-word only)
 	if len(termParams) > 1 {
 		var descTerms []string
 		for _, tp := range termParams {
-			descTerms = append(descTerms, fmt.Sprintf("COALESCE(i.description, '') ILIKE '%s' || %s || '%s'", "%", tp, "%"))
+			descTerms = append(descTerms, fmt.Sprintf("LOWER(COALESCE(i.description, '')) LIKE '%s' || %s || '%s'", "%", tp, "%"))
 		}
 		rankCases = append(rankCases, fmt.Sprintf("WHEN (%s) THEN 6", strings.Join(descTerms, " AND ")))
 	}
@@ -343,8 +349,8 @@ func buildSearchQuery(phrase string, terms []string, queryNum int, hasNum bool, 
 
 	// --- match_source expression ---
 	matchSourceExpr := fmt.Sprintf(`CASE
-		WHEN i.title ILIKE %s THEN 'title'
-		WHEN COALESCE(i.description, '') ILIKE %s THEN 'description'
+		WHEN LOWER(i.title) LIKE %s THEN 'title'
+		WHEN LOWER(COALESCE(i.description, '')) LIKE %s THEN 'description'
 		ELSE 'comment'
 	END`, phraseContains, phraseContains)
 
@@ -353,13 +359,13 @@ func buildSearchQuery(phrase string, terms []string, queryNum int, hasNum bool, 
 		var titleTerms []string
 		var descTerms []string
 		for _, tp := range termParams {
-			titleTerms = append(titleTerms, fmt.Sprintf("i.title ILIKE '%s' || %s || '%s'", "%", tp, "%"))
-			descTerms = append(descTerms, fmt.Sprintf("COALESCE(i.description, '') ILIKE '%s' || %s || '%s'", "%", tp, "%"))
+			titleTerms = append(titleTerms, fmt.Sprintf("LOWER(i.title) LIKE '%s' || %s || '%s'", "%", tp, "%"))
+			descTerms = append(descTerms, fmt.Sprintf("LOWER(COALESCE(i.description, '')) LIKE '%s' || %s || '%s'", "%", tp, "%"))
 		}
 		matchSourceExpr = fmt.Sprintf(`CASE
-			WHEN i.title ILIKE %s THEN 'title'
+			WHEN LOWER(i.title) LIKE %s THEN 'title'
 			WHEN (%s) THEN 'title'
-			WHEN COALESCE(i.description, '') ILIKE %s THEN 'description'
+			WHEN LOWER(COALESCE(i.description, '')) LIKE %s THEN 'description'
 			WHEN (%s) THEN 'description'
 			ELSE 'comment'
 		END`,
@@ -371,11 +377,11 @@ func buildSearchQuery(phrase string, terms []string, queryNum int, hasNum bool, 
 	// --- matched_comment_content subquery ---
 	// Find the most recent matching comment for comment-source matches.
 	commentSubquery := fmt.Sprintf(`CASE
-		WHEN i.title ILIKE %s THEN ''
-		WHEN COALESCE(i.description, '') ILIKE %s THEN ''
+		WHEN LOWER(i.title) LIKE %s THEN ''
+		WHEN LOWER(COALESCE(i.description, '')) LIKE %s THEN ''
 		ELSE COALESCE(
 			(SELECT c.content FROM comment c
-			 WHERE c.issue_id = i.id AND c.content ILIKE %s
+			 WHERE c.issue_id = i.id AND LOWER(c.content) LIKE %s
 			 ORDER BY c.created_at DESC LIMIT 1),
 			''
 		)
@@ -387,18 +393,18 @@ func buildSearchQuery(phrase string, terms []string, queryNum int, hasNum bool, 
 		var descTerms []string
 		var commentTerms []string
 		for _, tp := range termParams {
-			titleTerms = append(titleTerms, fmt.Sprintf("i.title ILIKE '%s' || %s || '%s'", "%", tp, "%"))
-			descTerms = append(descTerms, fmt.Sprintf("COALESCE(i.description, '') ILIKE '%s' || %s || '%s'", "%", tp, "%"))
-			commentTerms = append(commentTerms, fmt.Sprintf("c.content ILIKE '%s' || %s || '%s'", "%", tp, "%"))
+			titleTerms = append(titleTerms, fmt.Sprintf("LOWER(i.title) LIKE '%s' || %s || '%s'", "%", tp, "%"))
+			descTerms = append(descTerms, fmt.Sprintf("LOWER(COALESCE(i.description, '')) LIKE '%s' || %s || '%s'", "%", tp, "%"))
+			commentTerms = append(commentTerms, fmt.Sprintf("LOWER(c.content) LIKE '%s' || %s || '%s'", "%", tp, "%"))
 		}
 		commentSubquery = fmt.Sprintf(`CASE
-			WHEN i.title ILIKE %s THEN ''
+			WHEN LOWER(i.title) LIKE %s THEN ''
 			WHEN (%s) THEN ''
-			WHEN COALESCE(i.description, '') ILIKE %s THEN ''
+			WHEN LOWER(COALESCE(i.description, '')) LIKE %s THEN ''
 			WHEN (%s) THEN ''
 			ELSE COALESCE(
 				(SELECT c.content FROM comment c
-				 WHERE c.issue_id = i.id AND (c.content ILIKE %s OR (%s))
+				 WHERE c.issue_id = i.id AND (LOWER(c.content) LIKE %s OR (%s))
 				 ORDER BY c.created_at DESC LIMIT 1),
 				''
 			)
@@ -438,7 +444,7 @@ func buildSearchQuery(phrase string, terms []string, queryNum int, hasNum bool, 
 
 func (h *Handler) SearchIssues(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
-	workspaceID := resolveWorkspaceID(r)
+	workspaceID := h.resolveWorkspaceID(r)
 
 	q := r.URL.Query().Get("q")
 	if q == "" {
@@ -550,7 +556,7 @@ func (h *Handler) SearchIssues(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) ListIssues(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 
-	workspaceID := resolveWorkspaceID(r)
+	workspaceID := h.resolveWorkspaceID(r)
 	wsUUID := parseUUID(workspaceID)
 
 	// Parse optional filter params
@@ -562,6 +568,22 @@ func (h *Handler) ListIssues(w http.ResponseWriter, r *http.Request) {
 	if a := r.URL.Query().Get("assignee_id"); a != "" {
 		assigneeFilter = parseUUID(a)
 	}
+	var assigneeIdsFilter []pgtype.UUID
+	if ids := r.URL.Query().Get("assignee_ids"); ids != "" {
+		for _, raw := range strings.Split(ids, ",") {
+			if s := strings.TrimSpace(raw); s != "" {
+				assigneeIdsFilter = append(assigneeIdsFilter, parseUUID(s))
+			}
+		}
+	}
+	var creatorFilter pgtype.UUID
+	if c := r.URL.Query().Get("creator_id"); c != "" {
+		creatorFilter = parseUUID(c)
+	}
+	var projectFilter pgtype.UUID
+	if p := r.URL.Query().Get("project_id"); p != "" {
+		projectFilter = parseUUID(p)
+	}
 
 	// open_only=true returns all non-done/cancelled issues (no limit).
 	if r.URL.Query().Get("open_only") == "true" {
@@ -569,6 +591,9 @@ func (h *Handler) ListIssues(w http.ResponseWriter, r *http.Request) {
 			WorkspaceID: wsUUID,
 			Priority:    priorityFilter,
 			AssigneeID:  assigneeFilter,
+			AssigneeIds: assigneeIdsFilter,
+			CreatorID:   creatorFilter,
+			ProjectID:   projectFilter,
 		})
 		if err != nil {
 			writeError(w, http.StatusInternalServerError, "failed to list issues")
@@ -613,6 +638,9 @@ func (h *Handler) ListIssues(w http.ResponseWriter, r *http.Request) {
 		Status:      statusFilter,
 		Priority:    priorityFilter,
 		AssigneeID:  assigneeFilter,
+		AssigneeIds: assigneeIdsFilter,
+		CreatorID:   creatorFilter,
+		ProjectID:   projectFilter,
 	})
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to list issues")
@@ -625,6 +653,9 @@ func (h *Handler) ListIssues(w http.ResponseWriter, r *http.Request) {
 		Status:      statusFilter,
 		Priority:    priorityFilter,
 		AssigneeID:  assigneeFilter,
+		AssigneeIds: assigneeIdsFilter,
+		CreatorID:   creatorFilter,
+		ProjectID:   projectFilter,
 	})
 	if err != nil {
 		total = int64(len(issues))
@@ -696,6 +727,34 @@ func (h *Handler) ListChildIssues(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+func (h *Handler) ChildIssueProgress(w http.ResponseWriter, r *http.Request) {
+	wsID := h.resolveWorkspaceID(r)
+	wsUUID := parseUUID(wsID)
+
+	rows, err := h.Queries.ChildIssueProgress(r.Context(), wsUUID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to get child issue progress")
+		return
+	}
+
+	type progressEntry struct {
+		ParentIssueID string `json:"parent_issue_id"`
+		Total         int64  `json:"total"`
+		Done          int64  `json:"done"`
+	}
+	resp := make([]progressEntry, len(rows))
+	for i, row := range rows {
+		resp[i] = progressEntry{
+			ParentIssueID: uuidToString(row.ParentIssueID),
+			Total:         row.Total,
+			Done:          row.Done,
+		}
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"progress": resp,
+	})
+}
+
 type CreateIssueRequest struct {
 	Title              string   `json:"title"`
 	Description        *string  `json:"description"`
@@ -721,7 +780,7 @@ func (h *Handler) CreateIssue(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	workspaceID := resolveWorkspaceID(r)
+	workspaceID := h.resolveWorkspaceID(r)
 
 	// Get creator from context (set by auth middleware)
 	creatorID, ok := requireUserID(w, r)
@@ -731,7 +790,7 @@ func (h *Handler) CreateIssue(w http.ResponseWriter, r *http.Request) {
 
 	status := req.Status
 	if status == "" {
-		status = "backlog"
+		status = "todo"
 	}
 	priority := req.Priority
 	if priority == "" {
@@ -756,6 +815,10 @@ func (h *Handler) CreateIssue(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var parentIssueID pgtype.UUID
+	var projectID pgtype.UUID
+	if req.ProjectID != nil {
+		projectID = parseUUID(*req.ProjectID)
+	}
 	if req.ParentIssueID != nil {
 		parentIssueID = parseUUID(*req.ParentIssueID)
 		// Validate parent exists in the same workspace.
@@ -766,6 +829,9 @@ func (h *Handler) CreateIssue(w http.ResponseWriter, r *http.Request) {
 		if err != nil || !parent.ID.Valid {
 			writeError(w, http.StatusBadRequest, "parent issue not found in this workspace")
 			return
+		}
+		if req.ProjectID == nil {
+			projectID = parent.ProjectID
 		}
 	}
 
@@ -813,7 +879,7 @@ func (h *Handler) CreateIssue(w http.ResponseWriter, r *http.Request) {
 		Position:           0,
 		DueDate:            dueDate,
 		Number:             issueNumber,
-		ProjectID:          func() pgtype.UUID { if req.ProjectID != nil { return parseUUID(*req.ProjectID) }; return pgtype.UUID{} }(),
+		ProjectID:          projectID,
 	})
 	if err != nil {
 		slog.Warn("create issue failed", append(logger.RequestAttrs(r), "error", err, "workspace_id", workspaceID)...)
@@ -851,7 +917,7 @@ func (h *Handler) CreateIssue(w http.ResponseWriter, r *http.Request) {
 	slog.Info("issue created", append(logger.RequestAttrs(r), "issue_id", uuidToString(issue.ID), "title", issue.Title, "status", issue.Status, "workspace_id", workspaceID)...)
 	h.publish(protocol.EventIssueCreated, workspaceID, creatorType, actualCreatorID, map[string]any{"issue": resp})
 
-	// Only ready issues in todo are enqueued for agents.
+	// Enqueue agent task when an agent-assigned issue is created.
 	if issue.AssigneeType.Valid && issue.AssigneeID.Valid {
 		if h.shouldEnqueueAgentTask(r.Context(), issue) {
 			h.TaskService.EnqueueTaskForIssue(r.Context(), issue)
@@ -1046,14 +1112,30 @@ func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
 		"creator_id":          uuidToString(prevIssue.CreatorID),
 	})
 
-	// Reconcile task queue when assignee changes (not on status changes —
-	// agents manage issue status themselves via the CLI).
+	// Reconcile task queue when assignee changes.
 	if assigneeChanged {
 		h.TaskService.CancelTasksForIssue(r.Context(), issue.ID)
 
 		if h.shouldEnqueueAgentTask(r.Context(), issue) {
 			h.TaskService.EnqueueTaskForIssue(r.Context(), issue)
 		}
+	}
+
+	// Trigger the assigned agent when a member moves an issue out of backlog.
+	// Backlog acts as a parking lot — moving to an active status signals the
+	// issue is ready for work.
+	if statusChanged && !assigneeChanged && actorType == "member" &&
+		prevIssue.Status == "backlog" && issue.Status != "done" && issue.Status != "cancelled" {
+		if h.isAgentAssigneeReady(r.Context(), issue) {
+			h.TaskService.EnqueueTaskForIssue(r.Context(), issue)
+		}
+	}
+
+	// Cancel active tasks when the issue is cancelled by a user.
+	// This is distinct from agent-managed status transitions — cancellation
+	// is a user-initiated terminal action that should stop execution.
+	if statusChanged && issue.Status == "cancelled" {
+		h.TaskService.CancelTasksForIssue(r.Context(), issue.ID)
 	}
 
 	writeJSON(w, http.StatusOK, resp)
@@ -1090,23 +1172,23 @@ func (h *Handler) canAssignAgent(ctx context.Context, r *http.Request, agentID, 
 	return false, "cannot assign to private agent"
 }
 
-// shouldEnqueueAgentTask returns true when an issue assignment should trigger
-// the assigned agent. No status gate — assignment is an explicit human action,
-// so it should trigger regardless of issue status (e.g. assigning an agent to
-// a done issue to fix a discovered problem).
-// All trigger types (on_assign, on_comment, on_mention) are always enabled.
+// shouldEnqueueAgentTask returns true when an issue creation or assignment
+// should trigger the assigned agent. Backlog issues are skipped — backlog
+// acts as a parking lot where issues can be pre-assigned without immediately
+// triggering execution. Moving out of backlog is handled separately in
+// UpdateIssue.
 func (h *Handler) shouldEnqueueAgentTask(ctx context.Context, issue db.Issue) bool {
+	if issue.Status == "backlog" {
+		return false
+	}
 	return h.isAgentAssigneeReady(ctx, issue)
 }
 
 // shouldEnqueueOnComment returns true if a member comment on this issue should
-// trigger the assigned agent. Fires for any non-terminal status — comments are
-// conversational and can happen at any stage of active work.
+// trigger the assigned agent. Fires for any status — comments are
+// conversational and can happen at any stage, including after completion
+// (e.g. follow-up questions on a done issue).
 func (h *Handler) shouldEnqueueOnComment(ctx context.Context, issue db.Issue) bool {
-	// Don't trigger on terminal statuses (done, cancelled).
-	if issue.Status == "done" || issue.Status == "cancelled" {
-		return false
-	}
 	if !h.isAgentAssigneeReady(ctx, issue) {
 		return false
 	}
@@ -1146,6 +1228,8 @@ func (h *Handler) DeleteIssue(w http.ResponseWriter, r *http.Request) {
 	}
 
 	h.TaskService.CancelTasksForIssue(r.Context(), issue.ID)
+	// Fail any linked autopilot runs before delete (ON DELETE SET NULL clears issue_id).
+	h.Queries.FailAutopilotRunsByIssue(r.Context(), issue.ID)
 
 	// Collect all attachment URLs (issue-level + comment-level) before CASCADE delete.
 	attachmentURLs, _ := h.Queries.ListAttachmentURLsByIssueOrComments(r.Context(), issue.ID)
@@ -1204,7 +1288,7 @@ func (h *Handler) BatchUpdateIssues(w http.ResponseWriter, r *http.Request) {
 		json.Unmarshal(raw, &rawUpdates)
 	}
 
-	workspaceID := resolveWorkspaceID(r)
+	workspaceID := h.resolveWorkspaceID(r)
 	updated := 0
 	for _, issueID := range req.IssueIDs {
 		prevIssue, err := h.Queries.GetIssueInWorkspace(r.Context(), db.GetIssueInWorkspaceParams{
@@ -1221,6 +1305,7 @@ func (h *Handler) BatchUpdateIssues(w http.ResponseWriter, r *http.Request) {
 			AssigneeID:    prevIssue.AssigneeID,
 			DueDate:       prevIssue.DueDate,
 			ParentIssueID: prevIssue.ParentIssueID,
+			ProjectID:     prevIssue.ProjectID,
 		}
 
 		if req.Updates.Title != nil {
@@ -1264,6 +1349,50 @@ func (h *Handler) BatchUpdateIssues(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 
+		if _, ok := rawUpdates["parent_issue_id"]; ok {
+			if req.Updates.ParentIssueID != nil {
+				newParentID := parseUUID(*req.Updates.ParentIssueID)
+				// Cannot set self as parent.
+				if uuidToString(newParentID) == issueID {
+					continue
+				}
+				// Validate parent exists in the same workspace.
+				if _, err := h.Queries.GetIssueInWorkspace(r.Context(), db.GetIssueInWorkspaceParams{
+					ID:          newParentID,
+					WorkspaceID: prevIssue.WorkspaceID,
+				}); err != nil {
+					continue
+				}
+				// Cycle detection: walk up from the new parent to ensure we don't reach this issue.
+				cycleDetected := false
+				cursor := newParentID
+				for depth := 0; depth < 10; depth++ {
+					ancestor, err := h.Queries.GetIssue(r.Context(), cursor)
+					if err != nil || !ancestor.ParentIssueID.Valid {
+						break
+					}
+					if uuidToString(ancestor.ParentIssueID) == issueID {
+						cycleDetected = true
+						break
+					}
+					cursor = ancestor.ParentIssueID
+				}
+				if cycleDetected {
+					continue
+				}
+				params.ParentIssueID = newParentID
+			} else {
+				params.ParentIssueID = pgtype.UUID{Valid: false}
+			}
+		}
+		if _, ok := rawUpdates["project_id"]; ok {
+			if req.Updates.ProjectID != nil {
+				params.ProjectID = parseUUID(*req.Updates.ProjectID)
+			} else {
+				params.ProjectID = pgtype.UUID{Valid: false}
+			}
+		}
+
 		// Enforce agent visibility for batch assignment.
 		if req.Updates.AssigneeType != nil && *req.Updates.AssigneeType == "agent" && req.Updates.AssigneeID != nil {
 			if ok, _ := h.canAssignAgent(r.Context(), r, *req.Updates.AssigneeID, workspaceID); !ok {
@@ -1300,6 +1429,19 @@ func (h *Handler) BatchUpdateIssues(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 
+		// Trigger agent when moving out of backlog (batch).
+		if statusChanged && !assigneeChanged && actorType == "member" &&
+			prevIssue.Status == "backlog" && issue.Status != "done" && issue.Status != "cancelled" {
+			if h.isAgentAssigneeReady(r.Context(), issue) {
+				h.TaskService.EnqueueTaskForIssue(r.Context(), issue)
+			}
+		}
+
+		// Cancel active tasks when the issue is cancelled by a user.
+		if statusChanged && issue.Status == "cancelled" {
+			h.TaskService.CancelTasksForIssue(r.Context(), issue.ID)
+		}
+
 		updated++
 	}
 
@@ -1328,7 +1470,7 @@ func (h *Handler) BatchDeleteIssues(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	workspaceID := resolveWorkspaceID(r)
+	workspaceID := h.resolveWorkspaceID(r)
 	deleted := 0
 	for _, issueID := range req.IssueIDs {
 		issue, err := h.Queries.GetIssueInWorkspace(r.Context(), db.GetIssueInWorkspaceParams{
@@ -1340,11 +1482,17 @@ func (h *Handler) BatchDeleteIssues(w http.ResponseWriter, r *http.Request) {
 		}
 
 		h.TaskService.CancelTasksForIssue(r.Context(), issue.ID)
+		h.Queries.FailAutopilotRunsByIssue(r.Context(), issue.ID)
 
-		if err := h.Queries.DeleteIssue(r.Context(), parseUUID(issueID)); err != nil {
+		// Collect attachment URLs before CASCADE delete to clean up S3 objects.
+		attachmentURLs, _ := h.Queries.ListAttachmentURLsByIssueOrComments(r.Context(), issue.ID)
+
+		if err := h.Queries.DeleteIssue(r.Context(), issue.ID); err != nil {
 			slog.Warn("batch delete issue failed", "issue_id", issueID, "error", err)
 			continue
 		}
+
+		h.deleteS3Objects(r.Context(), attachmentURLs)
 
 		actorType, actorID := h.resolveActor(r, userID, workspaceID)
 		h.publish(protocol.EventIssueDeleted, workspaceID, actorType, actorID, map[string]any{"issue_id": issueID})

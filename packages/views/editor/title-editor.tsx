@@ -90,7 +90,9 @@ const TitleEditor = forwardRef<TitleEditorRef, TitleEditorProps>(
 
     const editor = useEditor({
       immediatelyRender: false,
-      content: `<p>${defaultValue}</p>`,
+      content: defaultValue
+        ? { type: "doc", content: [{ type: "paragraph", content: [{ type: "text", text: defaultValue }] }] }
+        : "",
       extensions: [
         SingleLineDocument,
         Paragraph,
@@ -125,6 +127,7 @@ const TitleEditor = forwardRef<TitleEditorRef, TitleEditorProps>(
         }, 50);
         return () => clearTimeout(timer);
       }
+      return undefined;
     }, [autoFocus, editor]);
 
     useImperativeHandle(ref, () => ({

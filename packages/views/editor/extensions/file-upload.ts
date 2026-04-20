@@ -1,9 +1,10 @@
 import { Extension } from "@tiptap/core";
 import { Plugin, PluginKey } from "@tiptap/pm/state";
 import type { UploadResult } from "@multica/core/hooks/use-file-upload";
+import { createSafeId } from "@multica/core/utils";
 
 /** Find and remove a fileCard node by uploadId. */
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
+ 
 function removeUploadingFileCard(editor: any, uploadId: string) {
   const { tr } = editor.state;
   let deleted = false;
@@ -14,12 +15,13 @@ function removeUploadingFileCard(editor: any, uploadId: string) {
       deleted = true;
       return false;
     }
+    return undefined;
   });
   if (deleted) editor.view.dispatch(tr);
 }
 
 /** Update a fileCard node from uploading state to final state with real URL. */
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
+ 
 function finalizeFileCard(editor: any, uploadId: string, href: string) {
   const { tr } = editor.state;
   let updated = false;
@@ -34,11 +36,12 @@ function finalizeFileCard(editor: any, uploadId: string, href: string) {
       updated = true;
       return false;
     }
+    return undefined;
   });
   if (updated) editor.view.dispatch(tr);
 }
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
+ 
 function removeImageBySrc(editor: any, src: string) {
   if (!editor) return;
   const { tr } = editor.state;
@@ -50,6 +53,7 @@ function removeImageBySrc(editor: any, src: string) {
       deleted = true;
       return false;
     }
+    return undefined;
   });
   if (deleted) editor.view.dispatch(tr);
 }
@@ -59,7 +63,7 @@ function removeImageBySrc(editor: any, src: string) {
  * Used by both paste/drop (at cursor) and button upload (at end of doc).
  */
 export async function uploadAndInsertFile(
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+   
   editor: any,
   file: File,
   handler: (file: File) => Promise<UploadResult | null>,
@@ -93,6 +97,7 @@ export async function uploadAndInsertFile(
             found = true;
             return false;
           }
+          return undefined;
         });
         if (found) editor.view.dispatch(tr);
       } else {
@@ -105,7 +110,7 @@ export async function uploadAndInsertFile(
     }
   } else {
     // Non-image: insert skeleton fileCard → upload → finalize with real URL
-    const uploadId = crypto.randomUUID();
+    const uploadId = createSafeId();
     const cardAttrs = { filename: file.name, href: "", fileSize: file.size, uploading: true, uploadId };
     const insertContent = { type: "fileCard", attrs: cardAttrs };
     if (pos !== undefined) {
@@ -127,6 +132,18 @@ export async function uploadAndInsertFile(
   }
 }
 
+/** Deduplicate files from the same paste/drop event.
+ *  macOS/Chrome can put the same file in the FileList twice. */
+function dedupFiles(files: FileList): File[] {
+  const seen = new Set<string>();
+  return Array.from(files).filter((file) => {
+    const key = `${file.name}\0${file.size}\0${file.type}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
 export function createFileUploadExtension(
   onUploadFileRef: React.RefObject<((file: File) => Promise<UploadResult | null>) | undefined>,
 ) {
@@ -138,7 +155,7 @@ export function createFileUploadExtension(
       const handleFiles = async (files: FileList) => {
         const handler = onUploadFileRef.current;
         if (!handler) return false;
-        for (const file of Array.from(files)) {
+        for (const file of dedupFiles(files)) {
           await uploadAndInsertFile(editor, file, handler);
         }
         return true;
@@ -165,10 +182,10 @@ export function createFileUploadExtension(
               // Only the first file uses the drop position; subsequent files
               // append to the end to avoid stale position issues.
               const dropPos = view.posAtCoords({ left: dragEvent.clientX, top: dragEvent.clientY });
-              const fileArray = Array.from(files);
-              for (let i = 0; i < fileArray.length; i++) {
+              const unique = dedupFiles(files);
+              for (let i = 0; i < unique.length; i++) {
                 const insertPos = i === 0 ? dropPos?.pos : undefined;
-                uploadAndInsertFile(editor, fileArray[i]!, handler, insertPos);
+                uploadAndInsertFile(editor, unique[i]!, handler, insertPos);
               }
               return true;
             },

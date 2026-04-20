@@ -3,10 +3,10 @@
 import * as React from "react";
 import {
   Markdown as MarkdownBase,
-  MemoizedMarkdown as MemoizedMarkdownBase,
   type MarkdownProps as MarkdownBaseProps,
   type RenderMode,
 } from "@multica/ui/markdown";
+import { useConfigStore } from "@multica/core/config";
 import { IssueMentionCard } from "../issues/components/issue-mention-card";
 
 export type { RenderMode };
@@ -31,27 +31,13 @@ function defaultRenderMention({
 }
 
 /**
- * App-level Markdown wrapper that injects IssueMentionCard via renderMention.
- * Callers that need custom mention rendering can pass their own renderMention prop.
+ * App-level Markdown wrapper that injects IssueMentionCard via renderMention
+ * and cdnDomain from the config store for file card rendering.
  */
 export function Markdown(props: MarkdownProps): React.JSX.Element {
-  return <MarkdownBase renderMention={defaultRenderMention} {...props} />;
+  const cdnDomain = useConfigStore((s) => s.cdnDomain);
+  return <MarkdownBase renderMention={defaultRenderMention} cdnDomain={cdnDomain} {...props} />;
 }
 
-export const MemoizedMarkdown = React.memo(
-  Markdown,
-  (prevProps, nextProps) => {
-    if (prevProps.id && nextProps.id) {
-      return (
-        prevProps.id === nextProps.id &&
-        prevProps.children === nextProps.children &&
-        prevProps.mode === nextProps.mode
-      );
-    }
-    return (
-      prevProps.children === nextProps.children &&
-      prevProps.mode === nextProps.mode
-    );
-  },
-);
+export const MemoizedMarkdown = React.memo(Markdown);
 MemoizedMarkdown.displayName = "MemoizedMarkdown";

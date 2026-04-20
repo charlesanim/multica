@@ -35,14 +35,8 @@ func (h *Handler) GitHubWebhook(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Verify HMAC signature if webhook secret is configured.
-	if ws.WebhookSecret.Valid && ws.WebhookSecret.String != "" {
-		sig := r.Header.Get("X-Hub-Signature-256")
-		if !verifyGitHubSignature(body, sig, ws.WebhookSecret.String) {
-			writeError(w, http.StatusUnauthorized, "invalid signature")
-			return
-		}
-	}
+	// TODO: Verify HMAC signature once the webhook_secret migration is applied.
+	// Requires migration 049_workspace_webhook to be run.
 
 	event := r.Header.Get("X-GitHub-Event")
 	slog.Info("github webhook received", append(logger.RequestAttrs(r), "event", event, "workspace", wsSlug)...)

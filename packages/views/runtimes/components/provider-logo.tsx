@@ -28,63 +28,85 @@ function OpenCodeLogo({ className }: { className: string }) {
   );
 }
 
-// OpenClaw — official pixel lobster mascot from openclaw/openclaw
+// OpenClaw — lobster mascot, vector version based on official branding
 function OpenClawLogo({ className }: { className: string }) {
   return (
     <svg viewBox="0 0 16 16" fill="none" className={className}>
-      {/* outline */}
-      <g fill="#3a0a0d">
-        <rect x="1" y="5" width="1" height="3" />
-        <rect x="2" y="4" width="1" height="1" />
-        <rect x="2" y="8" width="1" height="1" />
-        <rect x="3" y="3" width="1" height="1" />
-        <rect x="3" y="9" width="1" height="1" />
-        <rect x="4" y="2" width="1" height="1" />
-        <rect x="4" y="10" width="1" height="1" />
-        <rect x="5" y="2" width="6" height="1" />
-        <rect x="11" y="2" width="1" height="1" />
-        <rect x="12" y="3" width="1" height="1" />
-        <rect x="12" y="9" width="1" height="1" />
-        <rect x="13" y="4" width="1" height="1" />
-        <rect x="13" y="8" width="1" height="1" />
-        <rect x="14" y="5" width="1" height="3" />
-        <rect x="5" y="11" width="6" height="1" />
-        <rect x="4" y="12" width="1" height="1" />
-        <rect x="11" y="12" width="1" height="1" />
-        <rect x="3" y="13" width="1" height="1" />
-        <rect x="12" y="13" width="1" height="1" />
-        <rect x="5" y="14" width="6" height="1" />
-      </g>
-      {/* body */}
-      <g fill="#ff4f40">
-        <rect x="5" y="3" width="6" height="1" />
-        <rect x="4" y="4" width="8" height="1" />
-        <rect x="3" y="5" width="10" height="1" />
-        <rect x="3" y="6" width="10" height="1" />
-        <rect x="3" y="7" width="10" height="1" />
-        <rect x="4" y="8" width="8" height="1" />
-        <rect x="5" y="9" width="6" height="1" />
-        <rect x="5" y="12" width="6" height="1" />
-        <rect x="6" y="13" width="4" height="1" />
-      </g>
-      {/* claws */}
-      <g fill="#ff775f">
-        <rect x="1" y="6" width="2" height="1" />
-        <rect x="2" y="5" width="1" height="1" />
-        <rect x="2" y="7" width="1" height="1" />
-        <rect x="13" y="6" width="2" height="1" />
-        <rect x="13" y="5" width="1" height="1" />
-        <rect x="13" y="7" width="1" height="1" />
-      </g>
-      {/* eyes */}
-      <g fill="#081016">
-        <rect x="6" y="5" width="1" height="1" />
-        <rect x="9" y="5" width="1" height="1" />
-      </g>
-      <g fill="#f5fbff">
-        <rect x="6" y="4" width="1" height="1" />
-        <rect x="9" y="4" width="1" height="1" />
-      </g>
+      {/* Body */}
+      <path
+        d="M8 2C5.5 2 3.5 4 3.5 6.5S5 10.5 6.5 11v1.5H8V11c.3.1.7.1 1 0v1.5h1.5V11c1.5-.5 3-2.5 3-4.5S10.5 2 8 2Z"
+        fill="#E8453A"
+      />
+      {/* Left claw */}
+      <path
+        d="M3.5 5.5C2 5 1 6 1.5 7s2 .5 2.2-.7"
+        fill="#FF6B5A"
+      />
+      {/* Right claw */}
+      <path
+        d="M12.5 5.5c1.5-.5 2.5.5 2 1.5s-2 .5-2.2-.7"
+        fill="#FF6B5A"
+      />
+      {/* Antennae */}
+      <path d="M6.5 3Q5 1.2 4.3 1.5" stroke="#FF6B5A" strokeWidth="0.8" strokeLinecap="round" />
+      <path d="M9.5 3Q11 1.2 11.7 1.5" stroke="#FF6B5A" strokeWidth="0.8" strokeLinecap="round" />
+      {/* Eyes */}
+      <circle cx="6.2" cy="5.2" r="0.9" fill="#050810" />
+      <circle cx="9.8" cy="5.2" r="0.9" fill="#050810" />
+      <circle cx="6.4" cy="5" r="0.3" fill="#00E5CC" />
+      <circle cx="10" cy="5" r="0.3" fill="#00E5CC" />
+    </svg>
+  );
+}
+
+// Hermes (NousResearch) — official anime mascot, 48×48 webp embedded as data URI
+const HERMES_ICON =
+  "data:image/webp;base64,UklGRuYDAABXRUJQVlA4INoDAADQEwCdASowADAAPm0uk0ckIiGhKrqpWIANiWkAEyQea/fD8IewvGL5V7Nb3H8u/MA8G9rT+4flL+UfIe42/23GB8zPqF/o3E0UAP5h/h/+F6ZX+x5evnX/r+4T/K/67/u/zg7znogfrusMANZLkn1gvlY/vNsKubtj/9xLSzxTsLr7K9GLdFNs5rwtISRcPXvH4z57n2fg0XR3aQ2D+pPpycwyl7TwAAD+/2DbjivnePzfyHCsdOgJXKlUR/OgAkofD7K4AdmsPKyP5Ml4/4HBYmIm5/efn/H+X3IZtngyaUOvwbFuRS/1yODFYO3vf3qeXGgPdfgIROXd/EPT7K2jysfvY9N71+w6g2gBPs+P6lxYkPf6S9QfpvH/7Pp7i8xRh0nVDBTEQyczSz7V9hoqo4nDJuii+SfibZRR/d5zB+9jkcb1DNN7YnC5Y7+WfGrE3eseXt3hSm+NS5++m1MHbjsrd9z/Q4HPRP/C85Po41XObalGyIUcFUL2j2n3uI/Yh6U8r6trCUJFB4kT3fsv6+8ylX/d96y2hq869FCXLjq4YqEO8vs5BtT52sf7KyDxPAWkH/b06YbfVXf4/7y5THL6Sr/4mOrrY9P2LW81f05HHFN8n0jcyqKOH7AluMm0AHPgFyz8RVrfBdmnPiC2FLMQfNDte5yGFzGC3fMlDed/tS/PO3Q/hjsNLvAXUUjqHyCo3JeN69jyNgWjjf8iUqoBsXT+lJyp2r8p60ad1jxhNyTblyJwda8aWEw1hFDeGjpMGguDF66RL4c+ZO+PhculC6WxvCsZ7IPAsdD7/ywx3w3AowJ66hAAK7k+m6X2QV06OVOCwyIGERex/AUyuBbLUK93X58+M+Si7YfYjVYGpoJ7JvSgD8ExaA21z9OY+si+1wreacDanKnFDmhwBQC3t6MLeXCOGp3VURDKl10K7tdKHQcb4hr48ba+1x/MrMRwHfq3IQrDIXPYCg4b0OLnVN9JyXttKGM63B5imIdKuU0r6hhSslT10lGLjnIJuwO5WKR0RHs+BX5vs6H63y3K7IuuZ1eRN+Aczvbs4QuDs6ZRuzjJ/1DJ5R/3ZrFPrtxvMwT06vAXIgcbhLGNLhOQUYRPdUN5MgyCtL5NH71ArTPLRRkIjhGwoCYXKKqlqIKKT9NX3vwp/nlh4SX71dlYg/mPXbJ9bMeVugyjqFahjFTJ/rT3HtBCWG8h+OvvbOFDFKurCG9BOhO9B719OS7zsP0KPqoymnv7hVvoJyZp0iziCbBvaJpmF9Cvfs8/vWqWr7TUo616WfMW+X9nkgpuqtnfAAAAAA==";
+
+function HermesLogo({ className }: { className: string }) {
+  return (
+    <img
+      src={HERMES_ICON}
+      alt="Hermes"
+      className={`${className} rounded-sm`}
+    />
+  );
+}
+
+// Pi (pi.dev) — official pixel-art "pi" wordmark, sourced from pi.dev/logo.svg
+function PiLogo({ className }: { className: string }) {
+  return (
+    <svg viewBox="0 0 800 800" fill="none" className={className}>
+      <rect width="800" height="800" rx="150" fill="#09090b" />
+      <path
+        fill="#fff"
+        fillRule="evenodd"
+        d="M165.29 165.29H517.36V400H400V517.36H282.65V634.72H165.29ZM282.65 282.65V400H400V282.65Z"
+      />
+      <path fill="#fff" d="M517.36 400H634.72V634.72H517.36Z" />
+    </svg>
+  );
+}
+
+// GitHub Copilot — GitHub mark (Invertocat)
+function CopilotLogo({ className }: { className: string }) {
+  return (
+    <svg viewBox="0 0 24 24" fill="currentColor" className={className}>
+      <path d="M12 1C5.9225 1 1 5.9225 1 12C1 16.8675 4.14875 20.9787 8.52125 22.4362C9.07125 22.5325 9.2775 22.2025 9.2775 21.9137C9.2775 21.6525 9.26375 20.7862 9.26375 19.865C6.5 20.3737 5.785 19.1912 5.565 18.5725C5.44125 18.2562 4.905 17.28 4.4375 17.0187C4.0525 16.8125 3.5025 16.3037 4.42375 16.29C5.29 16.2762 5.90875 17.0875 6.115 17.4175C7.105 19.0812 8.68625 18.6137 9.31875 18.325C9.415 17.61 9.70375 17.1287 10.02 16.8537C7.5725 16.5787 5.015 15.63 5.015 11.4225C5.015 10.2262 5.44125 9.23625 6.1425 8.46625C6.0325 8.19125 5.6475 7.06375 6.2525 5.55125C6.2525 5.55125 7.17375 5.2625 9.2775 6.67875C10.1575 6.43125 11.0925 6.3075 12.0275 6.3075C12.9625 6.3075 13.8975 6.43125 14.7775 6.67875C16.8813 5.24875 17.8025 5.55125 17.8025 5.55125C18.4075 7.06375 18.0225 8.19125 17.9125 8.46625C18.6138 9.23625 19.04 10.2125 19.04 11.4225C19.04 15.6437 16.4688 16.5787 14.0213 16.8537C14.42 17.1975 14.7638 17.8575 14.7638 18.8887C14.7638 20.36 14.75 21.5425 14.75 21.9137C14.75 22.2025 14.9563 22.5462 15.5063 22.4362C19.8513 20.9787 23 16.8537 23 12C23 5.9225 18.0775 1 12 1Z" />
+    </svg>
+  );
+}
+
+// Cursor — official brand logo from Cursor brand assets
+function CursorLogo({ className }: { className: string }) {
+  return (
+    <svg viewBox="600 300 400 400" fill="none" className={className}>
+      <path fill="#14120B" d="M999.994 554.294C999.994 559.859 999.994 565.419 999.962 570.984C999.935 575.67 999.882 580.357 999.753 585.038C999.475 595.247 998.875 605.542 997.059 615.639C995.217 625.88 992.212 635.409 987.477 644.718C982.822 653.861 976.738 662.233 969.485 669.491C962.227 676.748 953.861 682.828 944.712 687.482C935.409 692.217 925.875 695.222 915.633 697.065C905.537 698.88 895.242 699.48 885.033 699.759C880.346 699.887 875.665 699.941 870.978 699.968C865.413 700.005 859.853 700 854.288 700H745.695C740.13 700 734.571 700 729.005 699.968C724.319 699.941 719.632 699.887 714.951 699.759C704.742 699.48 694.447 698.88 684.35 697.065C674.109 695.222 664.58 692.217 655.271 687.482C646.128 682.828 637.756 676.743 630.499 669.491C623.241 662.233 617.161 653.866 612.507 644.718C607.772 635.414 604.767 625.88 602.925 615.639C601.109 605.542 600.509 595.247 600.23 585.038C600.102 580.352 600.048 575.67 600.021 570.984C600 565.419 600 559.859 600 554.294V445.701C600 440.136 600 434.576 600.032 429.011C600.059 424.324 600.112 419.637 600.241 414.956C600.52 404.747 601.119 394.452 602.935 384.356C604.778 374.115 607.783 364.586 612.518 355.277C617.172 346.133 623.257 337.762 630.509 330.504C637.767 323.246 646.133 317.167 655.282 312.512C664.586 307.777 674.12 304.772 684.361 302.93C694.458 301.114 704.752 300.514 714.961 300.236C719.648 300.107 724.329 300.054 729.016 300.027C734.576 300 740.136 300 745.701 300H854.294C859.859 300 865.419 300 870.984 300.032C875.67 300.059 880.357 300.112 885.038 300.241C895.247 300.52 905.542 301.119 915.639 302.935C925.88 304.778 935.409 307.783 944.718 312.518C953.861 317.172 962.233 323.257 969.491 330.509C976.748 337.767 982.828 346.133 987.482 355.282C992.217 364.586 995.222 374.12 997.065 384.361C998.88 394.458 999.48 404.752 999.759 414.961C999.887 419.648 999.941 424.329 999.968 429.016C1000.01 434.581 1000 440.141 1000 445.706V554.299L999.994 554.294Z"/>
+      <path fill="#72716D" d="M800.004 500L923.821 571.486C923.061 572.804 921.957 573.929 920.591 574.716L804.863 641.531C801.858 643.266 798.151 643.266 795.146 641.531L679.417 574.716C678.052 573.929 676.948 572.804 676.188 571.486L800.004 500Z"/>
+      <path fill="#55544F" d="M800.005 357.168V500L676.188 571.486C675.427 570.168 675.004 568.647 675.004 567.072V432.928C675.004 429.774 676.686 426.865 679.418 425.285L795.141 358.47C796.646 357.602 798.323 357.168 799.999 357.168H800.005Z"/>
+      <path fill="#43413C" d="M923.815 428.515C923.055 427.197 921.951 426.072 920.586 425.285L804.857 358.47C803.357 357.602 801.68 357.168 800.004 357.168V500L923.821 571.486C924.581 570.168 925.005 568.647 925.005 567.072V432.928C925.005 431.348 924.587 429.838 923.821 428.515H923.815Z"/>
+      <path fill="#D6D5D2" d="M915.156 433.518C915.857 434.728 915.954 436.281 915.156 437.663L802.764 632.323C802.008 633.641 800 633.1 800 631.584V503.311C800 502.287 799.727 501.302 799.229 500.44L915.15 433.512H915.156V433.518Z"/>
+      <path fill="white" d="M915.155 433.518L799.233 500.445C798.741 499.588 798.023 498.86 797.134 498.345L686.049 434.209C684.731 433.453 685.272 431.445 686.788 431.445H911.566C913.162 431.445 914.459 432.307 915.155 433.518Z"/>
     </svg>
   );
 }
@@ -105,6 +127,14 @@ export function ProviderLogo({
       return <OpenCodeLogo className={className} />;
     case "openclaw":
       return <OpenClawLogo className={className} />;
+    case "hermes":
+      return <HermesLogo className={className} />;
+    case "pi":
+      return <PiLogo className={className} />;
+    case "copilot":
+      return <CopilotLogo className={className} />;
+    case "cursor":
+      return <CursorLogo className={className} />;
     default:
       return <Monitor className={className} />;
   }
