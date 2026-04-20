@@ -1,0 +1,59 @@
+# Tailscale overlay — run alongside the base docker-compose.yml
+#
+# Usage:
+#   1. Generate a Tailscale auth key at https://login.tailscale.com/admin/settings/keys
+#   2. Add TS_AUTHKEY=tskey-auth-... to your .env
+#   3. Start with:
+#      docker compose -f docker-compose.yml -f docker-compose.tailscale.yml up -d
+#
+# The stack will appear as "multica" on your tailnet. Access from any
+# Tailscale device at http://multica:3000 (web) or http://multica:8080 (API).
+
+services:
+  tailscale:
+    image: tailscale/tailscale:latest
+    hostname: multica
+    environment:
+      TS_AUTHKEY: ${TS_AUTHKEY}
+      TS_STATE_DIR: /var/lib/tailscale
+      TS_USERSPACE: "false"
+    volumes:
+      - tailscale-state:/var/lib/tailscale
+    devices:
+      - /dev/net/tun:/dev/net/tun
+    cap_add:
+      - net_admin
+    restart: unless-stopped
+
+  # Override backend to share Tailscale's network instead of exposing host ports
+  backend:
+    network_mode: service:tailscale
+    ports: !reset []
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      tailscale:
+        condition: service_started
+    environment:
+      PORT: 8080
+      DATABASE_URL: postgres://${POSTGRES_USER:-multica}:${POSTGRES_PASSWORD:-multica}@postgres:5432/${POSTGRES_DB:-multica}?sslmode=disable
+      JWT_SECRET: ${JWT_SECRET}
+      MULTICA_LOCAL_MODE: ${MULTICA_LOCAL_MODE:-false}
+      MULTICA_LOCAL_EMAIL: ${MULTICA_LOCAL_EMAIL:-local@localhost}
+      FRONTEND_ORIGIN: http://multica:3000
+      CORS_ALLOWED_ORIGINS: http://multica:3000,http://multica:${FRONTEND_PORT:-3000}
+      MULTICA_APP_URL: http://multica:3000
+      MULTICA_SERVER_URL: ws://multica:8080/ws
+
+  # Override frontend to share Tailscale's network
+  frontend:
+    network_mode: service:tailscale
+    ports: !reset []
+    depends_on:
+      backend:
+        condition: service_healthy
+      tailscale:
+        condition: service_started
+
+volumes:
+  tailscale-state:
