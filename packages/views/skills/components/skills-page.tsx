@@ -9,6 +9,8 @@ import {
   Save,
   AlertCircle,
   Download,
+  Globe,
+  FileSearch,
 } from "lucide-react";
 import type { Skill, CreateSkillRequest, UpdateSkillRequest } from "@multica/core/types";
 import {
@@ -40,6 +42,8 @@ import { skillListOptions, workspaceKeys } from "@multica/core/workspace/queries
 import { PageHeader } from "../../layout/page-header";
 import { FileTree } from "./file-tree";
 import { FileViewer } from "./file-viewer";
+import { SKILL_TEMPLATES } from "./skill-templates";
+import type { SkillTemplate } from "./skill-templates";
 
 // ---------------------------------------------------------------------------
 // Create Skill Dialog
@@ -254,6 +258,74 @@ function SkillListItem({
         </Badge>
       )}
     </button>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Suggested Skills — built-in templates
+// ---------------------------------------------------------------------------
+
+function SuggestedSkills({
+  existingNames,
+  onInstall,
+}: {
+  existingNames: string[];
+  onInstall: (template: SkillTemplate) => Promise<void>;
+}) {
+  const [installing, setInstalling] = useState<string | null>(null);
+
+  const available = SKILL_TEMPLATES.filter(
+    (t) => !existingNames.some((n) => n.toLowerCase() === t.data.name.toLowerCase()),
+  );
+
+  if (available.length === 0) return null;
+
+  const handleInstall = async (template: SkillTemplate) => {
+    setInstalling(template.id);
+    try {
+      await onInstall(template);
+    } finally {
+      setInstalling(null);
+    }
+  };
+
+  const iconMap = {
+    globe: Globe,
+    "file-search": FileSearch,
+  };
+
+  return (
+    <div className="border-t px-4 py-3">
+      <p className="text-xs font-medium text-muted-foreground uppercase tracking-wider mb-2">
+        Suggested
+      </p>
+      <div className="space-y-1.5">
+        {available.map((template) => {
+          const Icon = iconMap[template.icon];
+          return (
+            <button
+              key={template.id}
+              onClick={() => handleInstall(template)}
+              disabled={installing !== null}
+              className="flex w-full items-center gap-3 rounded-lg border border-dashed px-3 py-2.5 text-left transition-colors hover:bg-accent/50 disabled:opacity-50"
+            >
+              <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md bg-primary/10">
+                <Icon className="h-3.5 w-3.5 text-primary" />
+              </div>
+              <div className="min-w-0 flex-1">
+                <div className="text-xs font-medium">{template.name}</div>
+                <div className="mt-0.5 truncate text-[11px] text-muted-foreground">
+                  {template.description}
+                </div>
+              </div>
+              <span className="shrink-0 text-[11px] text-primary font-medium">
+                {installing === template.id ? "Adding..." : "+ Add"}
+              </span>
+            </button>
+          );
+        })}
+      </div>
+    </div>
   );
 }
 
@@ -642,6 +714,13 @@ export default function SkillsPage() {
     toast.success("Skill imported");
   };
 
+  const handleInstallTemplate = async (template: SkillTemplate) => {
+    const skill = await api.createSkill(template.data);
+    qc.invalidateQueries({ queryKey: workspaceKeys.skills(wsId) });
+    setSelectedId(skill.id);
+    toast.success(`${template.name} skill added`);
+  };
+
   const handleUpdate = async (id: string, data: UpdateSkillRequest) => {
     try {
       await api.updateSkill(id, data);
@@ -755,17 +834,27 @@ export default function SkillsPage() {
                 <Plus className="h-3 w-3" />
                 Create Skill
               </Button>
+              <SuggestedSkills
+                existingNames={skills.map((s) => s.name)}
+                onInstall={handleInstallTemplate}
+              />
             </div>
           ) : (
-            <div className="divide-y">
-              {skills.map((skill) => (
-                <SkillListItem
-                  key={skill.id}
-                  skill={skill}
-                  isSelected={skill.id === selectedId}
-                  onClick={() => setSelectedId(skill.id)}
-                />
-              ))}
+            <div className="flex flex-col h-full min-h-0">
+              <div className="divide-y flex-1 overflow-y-auto">
+                {skills.map((skill) => (
+                  <SkillListItem
+                    key={skill.id}
+                    skill={skill}
+                    isSelected={skill.id === selectedId}
+                    onClick={() => setSelectedId(skill.id)}
+                  />
+                ))}
+              </div>
+              <SuggestedSkills
+                existingNames={skills.map((s) => s.name)}
+                onInstall={handleInstallTemplate}
+              />
             </div>
           )}
         </div>
