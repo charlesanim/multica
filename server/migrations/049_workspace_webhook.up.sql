@@ -1,1 +1,1 @@
-ALTER TABLE workspace ADD COLUMN webhook_secret TEXT;
+ALTER TABLE workspace ADD COLUMN IF NOT EXISTS webhook_secret TEXT;
