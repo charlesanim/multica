@@ -135,7 +135,7 @@ function AttachmentList({ attachments, content, className }: { attachments?: Att
               className="block overflow-hidden rounded-md border border-border hover:border-foreground/20 transition-colors"
             >
               <img
-                src={a.url}
+                src={a.download_url || a.url}
                 alt={a.filename}
                 className="max-h-72 max-w-full object-contain"
                 loading="lazy"
