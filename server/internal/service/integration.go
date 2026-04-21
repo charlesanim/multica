@@ -118,8 +118,8 @@ func (s *IntegrationService) ImportExternalIssue(
 		Priority:      priority,
 		AssigneeType:  pgtype.Text{String: "agent", Valid: true},
 		AssigneeID:    integration.DefaultAgentID,
-		CreatorType:   "system",
-		CreatorID:     agent.ID, // Use agent as creator for system-imported issues
+		CreatorType:   "agent",
+		CreatorID:     agent.ID,
 		ParentIssueID: pgtype.UUID{},
 		Position:      0,
 		DueDate:       pgtype.Timestamptz{},
