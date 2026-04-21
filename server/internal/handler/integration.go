@@ -14,15 +14,16 @@ import (
 )
 
 type IntegrationResponse struct {
-	ID             string `json:"id"`
-	WorkspaceID    string `json:"workspace_id"`
-	Provider       string `json:"provider"`
-	Enabled        bool   `json:"enabled"`
-	Config         any    `json:"config"`
+	ID             string  `json:"id"`
+	WorkspaceID    string  `json:"workspace_id"`
+	Provider       string  `json:"provider"`
+	Enabled        bool    `json:"enabled"`
+	Config         any     `json:"config"`
 	DefaultAgentID *string `json:"default_agent_id"`
-	WebhookURL     string `json:"webhook_url,omitempty"`
-	CreatedAt      string `json:"created_at"`
-	UpdatedAt      string `json:"updated_at"`
+	WebhookSecret  *string `json:"webhook_secret,omitempty"`
+	WebhookURL     string  `json:"webhook_url,omitempty"`
+	CreatedAt      string  `json:"created_at"`
+	UpdatedAt      string  `json:"updated_at"`
 }
 
 func integrationToResponse(i db.WorkspaceIntegration) IntegrationResponse {
@@ -36,6 +37,7 @@ func integrationToResponse(i db.WorkspaceIntegration) IntegrationResponse {
 		Enabled:        i.Enabled,
 		Config:         config,
 		DefaultAgentID: uuidToPtr(i.DefaultAgentID),
+		WebhookSecret:  textToPtr(i.WebhookSecret),
 		CreatedAt:      timestampToString(i.CreatedAt),
 		UpdatedAt:      timestampToString(i.UpdatedAt),
 	}

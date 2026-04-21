@@ -214,16 +214,16 @@ function IntegrationCard({
       )}
 
       {/* Signing secret */}
-      {webhookUrl && (
+      {webhookUrl && provider === "linear" && (
         <div className="space-y-1">
           <label className="text-xs font-medium text-muted-foreground">
-            {provider === "linear" ? "Signing Secret" : "Webhook Secret"}
+            Signing Secret
           </label>
           <div className="flex items-center gap-2">
             <Input
               className="flex-1 text-xs font-mono"
               type="password"
-              placeholder={provider === "linear" ? "Paste the signing secret from Linear" : "Paste the secret from GitHub"}
+              placeholder="Paste the signing secret from Linear"
               value={secret}
               onChange={(e) => setSecret(e.target.value)}
             />
@@ -240,9 +240,31 @@ function IntegrationCard({
             </Button>
           </div>
           <p className="text-xs text-muted-foreground">
-            {provider === "linear"
-              ? "Linear provides this when you create the webhook. Paste it here to verify payloads."
-              : "Set a secret in GitHub webhook settings. Paste the same value here."}
+            Linear provides this when you create the webhook. Paste it here to verify payloads.
+          </p>
+        </div>
+      )}
+
+      {/* GitHub: show generated secret for user to copy into GitHub */}
+      {webhookUrl && provider === "github" && integration.webhook_secret && (
+        <div className="space-y-1">
+          <label className="text-xs font-medium text-muted-foreground">
+            Webhook Secret
+          </label>
+          <div className="flex items-center gap-2">
+            <code className="flex-1 text-xs bg-muted px-3 py-1.5 rounded font-mono overflow-x-auto">
+              {integration.webhook_secret}
+            </code>
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => navigator.clipboard.writeText(integration.webhook_secret!)}
+            >
+              Copy
+            </Button>
+          </div>
+          <p className="text-xs text-muted-foreground">
+            Copy this secret and paste it into GitHub&apos;s webhook &quot;Secret&quot; field.
           </p>
         </div>
       )}

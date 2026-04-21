@@ -7,6 +7,7 @@ export interface Integration {
   enabled: boolean;
   config: LinearIntegrationConfig | GitHubIntegrationConfig;
   default_agent_id: string | null;
+  webhook_secret: string | null;
   webhook_url?: string;
   created_at: string;
   updated_at: string;
