@@ -76,7 +76,7 @@ import { useWorkspaceId } from "@multica/core/hooks";
 import { issueListOptions, issueDetailOptions, childIssuesOptions, issueUsageOptions } from "@multica/core/issues/queries";
 import { memberListOptions, agentListOptions } from "@multica/core/workspace/queries";
 import { useUpdateIssue, useDeleteIssue } from "@multica/core/issues/mutations";
-import { useRecentIssuesStore } from "@multica/core/issues/stores";
+import { useRecentIssuesStore, useTimelineViewStore } from "@multica/core/issues/stores";
 import { useIssueTimeline } from "../hooks/use-issue-timeline";
 import { useIssueReactions } from "../hooks/use-issue-reactions";
 import { useIssueSubscribers } from "../hooks/use-issue-subscribers";
@@ -386,9 +386,14 @@ export function IssueDetail({ issueId, onDelete, defaultSidebarOpen = true, layo
 
   // Custom hooks — encapsulate timeline, reactions, subscribers
   const {
-    timeline, submitComment, submitReply,
+    timeline: rawTimeline, submitComment, submitReply,
     editComment, deleteComment, toggleReaction: handleToggleReaction,
   } = useIssueTimeline(id, user?.id);
+
+  const timelineSortDirection = useTimelineViewStore((s) => s.sortDirection);
+  const timeline = timelineSortDirection === "desc"
+    ? [...rawTimeline].reverse()
+    : rawTimeline;
 
   const {
     reactions: issueReactions,
@@ -1281,7 +1286,37 @@ export function IssueDetail({ issueId, onDelete, defaultSidebarOpen = true, layo
             </div>
 
             {/* Timeline entries */}
-            <div className="mt-4 flex flex-col gap-3">
+            <div className="mt-4">
+              <div className="flex items-center justify-between px-4 mb-2">
+                <span className="text-xs font-medium text-muted-foreground">Activity</span>
+                <Tooltip>
+                  <TooltipTrigger
+                    render={
+                      <button
+                        type="button"
+                        onClick={() => useTimelineViewStore.getState().toggleSortDirection()}
+                        className="flex items-center gap-1 rounded px-1.5 py-0.5 text-xs text-muted-foreground hover:bg-muted hover:text-foreground transition-colors"
+                      >
+                        {timelineSortDirection === "asc" ? (
+                          <>
+                            <ArrowUp className="h-3 w-3" />
+                            <span>Oldest first</span>
+                          </>
+                        ) : (
+                          <>
+                            <ArrowDown className="h-3 w-3" />
+                            <span>Newest first</span>
+                          </>
+                        )}
+                      </button>
+                    }
+                  />
+                  <TooltipContent side="top">
+                    {timelineSortDirection === "asc" ? "Switch to newest first" : "Switch to oldest first"}
+                  </TooltipContent>
+                </Tooltip>
+              </div>
+              <div className="flex flex-col gap-3">
               {(() => {
                 const topLevel = timeline.filter((e) => e.type === "activity" || !e.parent_id);
                 const repliesByParent = new Map<string, TimelineEntry[]>();
@@ -1396,6 +1431,7 @@ export function IssueDetail({ issueId, onDelete, defaultSidebarOpen = true, layo
                   );
                 });
               })()}
+            </div>
             </div>
 
             {/* Bottom comment input — no avatar, full width */}
