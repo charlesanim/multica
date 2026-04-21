@@ -341,7 +341,9 @@ export function useCreateComment(issueId: string) {
             updated_at: comment.updated_at,
           };
           if (old.some((e) => e.id === comment.id)) return old;
-          return [...old, entry];
+          return [...old, entry].sort(
+            (a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime(),
+          );
         },
       );
     },

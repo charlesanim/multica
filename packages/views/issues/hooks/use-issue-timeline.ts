@@ -71,7 +71,7 @@ export function useIssueTimeline(issueId: string, userId?: string) {
             if (!old) return old;
             if (old.some((e) => e.id === comment.id)) return old;
             return [...old, commentToTimelineEntry(comment)].sort(
-              (a, b) => a.created_at.localeCompare(b.created_at),
+              (a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime(),
             );
           },
         );
@@ -147,7 +147,7 @@ export function useIssueTimeline(issueId: string, userId?: string) {
             if (!old) return old;
             if (old.some((e) => e.id === entry.id)) return old;
             return [...old, entry].sort(
-              (a, b) => a.created_at.localeCompare(b.created_at),
+              (a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime(),
             );
           },
         );
