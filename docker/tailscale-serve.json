@@ -1,7 +1,4 @@
 {
-  "AllowFunnel": {
-    "443": true
-  },
   "TCP": {
     "443": {
       "HTTPS": true
@@ -25,9 +22,6 @@
         "/health": {
           "Proxy": "http://127.0.0.1:4900/health"
         },
-        "/local-1041ef66/webhooks/": {
-          "Proxy": "http://127.0.0.1:4900/local-1041ef66/webhooks/"
-        },
         "/": {
           "Proxy": "http://127.0.0.1:4800"
         }
@@ -47,13 +41,13 @@
         "/health": {
           "Proxy": "http://127.0.0.1:4900/health"
         },
-        "/local-1041ef66/webhooks/": {
-          "Proxy": "http://127.0.0.1:4900/local-1041ef66/webhooks/"
-        },
         "/": {
           "Proxy": "http://127.0.0.1:4800"
         }
       }
     }
+  },
+  "AllowFunnel": {
+    "8443": true
   }
 }
