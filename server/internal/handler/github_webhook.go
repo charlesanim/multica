@@ -39,10 +39,22 @@ func (h *Handler) GitHubWebhook(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Verify HMAC signature using the workspace webhook secret.
-	if ws.WebhookSecret.Valid && ws.WebhookSecret.String != "" {
+	// Verify HMAC signature using the integration's webhook secret (preferred)
+	// or the workspace-level webhook secret (legacy fallback).
+	var webhookSecret string
+	integration, intErr := h.Queries.GetWorkspaceIntegrationByProvider(r.Context(), db.GetWorkspaceIntegrationByProviderParams{
+		WorkspaceID: ws.ID,
+		Provider:    "github",
+	})
+	if intErr == nil && integration.WebhookSecret.Valid && integration.WebhookSecret.String != "" {
+		webhookSecret = integration.WebhookSecret.String
+	} else if ws.WebhookSecret.Valid && ws.WebhookSecret.String != "" {
+		webhookSecret = ws.WebhookSecret.String
+	}
+
+	if webhookSecret != "" {
 		sig := r.Header.Get("X-Hub-Signature-256")
-		if !verifyGitHubSignature(body, sig, ws.WebhookSecret.String) {
+		if !verifyGitHubSignature(body, sig, webhookSecret) {
 			writeError(w, http.StatusUnauthorized, "invalid signature")
 			return
 		}
