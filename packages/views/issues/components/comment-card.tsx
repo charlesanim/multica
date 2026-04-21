@@ -119,9 +119,32 @@ function AttachmentList({ attachments, content, className }: { attachments?: Att
     : attachments;
   if (!standalone.length) return null;
 
+  const images = standalone.filter((a) => a.content_type?.startsWith("image/"));
+  const files = standalone.filter((a) => !a.content_type?.startsWith("image/"));
+
   return (
-    <div className={cn("flex flex-col gap-1", className)}>
-      {standalone.map((a) => (
+    <div className={cn("flex flex-col gap-2", className)}>
+      {images.length > 0 && (
+        <div className="flex flex-wrap gap-2">
+          {images.map((a) => (
+            <a
+              key={a.id}
+              href={a.download_url || a.url}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="block overflow-hidden rounded-md border border-border hover:border-foreground/20 transition-colors"
+            >
+              <img
+                src={a.url}
+                alt={a.filename}
+                className="max-h-72 max-w-full object-contain"
+                loading="lazy"
+              />
+            </a>
+          ))}
+        </div>
+      )}
+      {files.map((a) => (
         <div
           key={a.id}
           className="flex items-center gap-2 rounded-md border border-border bg-muted/50 px-2.5 py-1 transition-colors hover:bg-muted"
