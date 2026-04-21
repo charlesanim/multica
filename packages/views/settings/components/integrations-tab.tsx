@@ -58,6 +58,9 @@ export function IntegrationsTab() {
             onUpdate={(id, config) =>
               updateIntegration.mutate({ id, config })
             }
+            onUpdateSecret={(id, webhook_secret) =>
+              updateIntegration.mutate({ id, webhook_secret })
+            }
           />
 
           <IntegrationCard
@@ -79,6 +82,9 @@ export function IntegrationsTab() {
             onUpdate={(id, config) =>
               updateIntegration.mutate({ id, config })
             }
+            onUpdateSecret={(id, webhook_secret) =>
+              updateIntegration.mutate({ id, webhook_secret })
+            }
           />
         </>
       )}
@@ -96,6 +102,7 @@ interface IntegrationCardProps {
   onToggle: (id: string, enabled: boolean) => void;
   onDelete: (id: string) => void;
   onUpdate: (id: string, config: Record<string, unknown>) => void;
+  onUpdateSecret: (id: string, secret: string) => void;
 }
 
 function IntegrationCard({
@@ -108,8 +115,10 @@ function IntegrationCard({
   onToggle,
   onDelete,
   onUpdate,
+  onUpdateSecret,
 }: IntegrationCardProps) {
   const [editing, setEditing] = useState(false);
+  const [secret, setSecret] = useState("");
 
   if (!integration) {
     return (
@@ -200,6 +209,40 @@ function IntegrationCard({
             {provider === "linear"
               ? "Add this URL in Linear → Settings → API → Webhooks"
               : "Add this URL in GitHub → Repo Settings → Webhooks"}
+          </p>
+        </div>
+      )}
+
+      {/* Signing secret */}
+      {webhookUrl && (
+        <div className="space-y-1">
+          <label className="text-xs font-medium text-muted-foreground">
+            {provider === "linear" ? "Signing Secret" : "Webhook Secret"}
+          </label>
+          <div className="flex items-center gap-2">
+            <Input
+              className="flex-1 text-xs font-mono"
+              type="password"
+              placeholder={provider === "linear" ? "Paste the signing secret from Linear" : "Paste the secret from GitHub"}
+              value={secret}
+              onChange={(e) => setSecret(e.target.value)}
+            />
+            <Button
+              variant="outline"
+              size="sm"
+              disabled={!secret}
+              onClick={() => {
+                onUpdateSecret(integration.id, secret);
+                setSecret("");
+              }}
+            >
+              Save
+            </Button>
+          </div>
+          <p className="text-xs text-muted-foreground">
+            {provider === "linear"
+              ? "Linear provides this when you create the webhook. Paste it here to verify payloads."
+              : "Set a secret in GitHub webhook settings. Paste the same value here."}
           </p>
         </div>
       )}

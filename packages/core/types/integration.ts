@@ -35,6 +35,7 @@ export interface UpdateIntegrationRequest {
   enabled?: boolean;
   config?: LinearIntegrationConfig | GitHubIntegrationConfig;
   default_agent_id?: string;
+  webhook_secret?: string;
 }
 
 export interface ExternalIssueLink {

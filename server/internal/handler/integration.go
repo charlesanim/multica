@@ -139,6 +139,7 @@ type UpdateIntegrationRequest struct {
 	Enabled        *bool   `json:"enabled"`
 	Config         any     `json:"config"`
 	DefaultAgentID *string `json:"default_agent_id"`
+	WebhookSecret  *string `json:"webhook_secret"`
 }
 
 func (h *Handler) UpdateIntegration(w http.ResponseWriter, r *http.Request) {
@@ -165,11 +166,17 @@ func (h *Handler) UpdateIntegration(w http.ResponseWriter, r *http.Request) {
 		agentID = parseUUID(*req.DefaultAgentID)
 	}
 
+	var webhookSecret pgtype.Text
+	if req.WebhookSecret != nil {
+		webhookSecret = pgtype.Text{String: *req.WebhookSecret, Valid: true}
+	}
+
 	integration, err := h.Queries.UpdateWorkspaceIntegration(r.Context(), db.UpdateWorkspaceIntegrationParams{
 		ID:             parseUUID(id),
 		Enabled:        enabled,
 		Config:         configBytes,
 		DefaultAgentID: agentID,
+		WebhookSecret:  webhookSecret,
 	})
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to update integration")
