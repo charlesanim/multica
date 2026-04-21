@@ -9,11 +9,15 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"strconv"
 	"strings"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/multica-ai/multica/server/internal/logger"
+	"github.com/multica-ai/multica/server/internal/service"
+	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
+	"github.com/multica-ai/multica/server/pkg/protocol"
 )
 
 // GitHubWebhook handles incoming GitHub webhook events for a workspace.
@@ -35,8 +39,14 @@ func (h *Handler) GitHubWebhook(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// TODO: Verify HMAC signature once the webhook_secret migration is applied.
-	// Requires migration 049_workspace_webhook to be run.
+	// Verify HMAC signature using the workspace webhook secret.
+	if ws.WebhookSecret.Valid && ws.WebhookSecret.String != "" {
+		sig := r.Header.Get("X-Hub-Signature-256")
+		if !verifyGitHubSignature(body, sig, ws.WebhookSecret.String) {
+			writeError(w, http.StatusUnauthorized, "invalid signature")
+			return
+		}
+	}
 
 	event := r.Header.Get("X-GitHub-Event")
 	slog.Info("github webhook received", append(logger.RequestAttrs(r), "event", event, "workspace", wsSlug)...)
@@ -49,6 +59,8 @@ func (h *Handler) GitHubWebhook(w http.ResponseWriter, r *http.Request) {
 	case "issue_comment":
 		// PR comments come as issue_comment events when posted on the PR conversation
 		h.handleIssueComment(r, ws, body)
+	case "issues":
+		h.handleGitHubIssuesEvent(r, ws, body)
 	}
 
 	// Always return 200 to acknowledge receipt.
@@ -217,6 +229,119 @@ func (h *Handler) notifyAgentAboutPR(r *http.Request, ws db.Workspace, prNumber 
 		Type:        "comment",
 	})
 	slog.Info("github webhook: notified agent", "agent", agent.Name, "issue", uuidToString(issue.ID), "pr", prNumber)
+}
+
+// handleGitHubIssuesEvent processes GitHub issue events to import issues into Multica.
+func (h *Handler) handleGitHubIssuesEvent(r *http.Request, ws db.Workspace, body []byte) {
+	var payload struct {
+		Action string `json:"action"`
+		Issue  struct {
+			NodeID  string `json:"node_id"`
+			Number  int    `json:"number"`
+			Title   string `json:"title"`
+			Body    string `json:"body"`
+			HTMLURL string `json:"html_url"`
+			Labels  []struct {
+				Name string `json:"name"`
+			} `json:"labels"`
+			User struct {
+				Login string `json:"login"`
+			} `json:"user"`
+		} `json:"issue"`
+		Repository struct {
+			FullName string `json:"full_name"` // "owner/repo"
+		} `json:"repository"`
+	}
+	if err := json.Unmarshal(body, &payload); err != nil {
+		return
+	}
+
+	// Only import on opened/labeled events.
+	if payload.Action != "opened" && payload.Action != "labeled" {
+		return
+	}
+
+	// Skip issues from bots.
+	login := payload.Issue.User.Login
+	if strings.HasSuffix(login, "[bot]") || login == "github-actions" {
+		return
+	}
+
+	if h.IntegrationService == nil {
+		slog.Error("github webhook: IntegrationService not initialized")
+		return
+	}
+
+	integration, err := h.Queries.GetWorkspaceIntegrationByProvider(r.Context(), db.GetWorkspaceIntegrationByProviderParams{
+		WorkspaceID: ws.ID,
+		Provider:    "github",
+	})
+	if err != nil || !integration.Enabled {
+		return
+	}
+
+	// Check if labels match the configured labels.
+	var config service.GitHubIntegrationConfig
+	if err := json.Unmarshal(integration.Config, &config); err != nil {
+		slog.Warn("github webhook: failed to parse integration config", "error", err)
+		return
+	}
+
+	// If labels are configured, only import issues that have at least one matching label.
+	if len(config.Labels) > 0 {
+		matched := false
+		for _, issueLabel := range payload.Issue.Labels {
+			for _, configLabel := range config.Labels {
+				if strings.EqualFold(issueLabel.Name, configLabel) {
+					matched = true
+					break
+				}
+			}
+			if matched {
+				break
+			}
+		}
+		if !matched {
+			return
+		}
+	}
+
+	identifier := payload.Repository.FullName + "#" + strconv.Itoa(payload.Issue.Number)
+
+	ext := service.ExternalIssue{
+		Provider:    "github",
+		ExternalID:  payload.Issue.NodeID,
+		Identifier:  identifier,
+		Title:       payload.Issue.Title,
+		Description: payload.Issue.Body,
+		URL:         payload.Issue.HTMLURL,
+		Priority:    "medium",
+		Status:      "open",
+	}
+
+	issue, created, err := h.IntegrationService.ImportExternalIssue(r.Context(), ws.ID, integration, ext)
+	if err != nil {
+		slog.Warn("github webhook: import failed", "error", err, "identifier", identifier)
+		return
+	}
+
+	if created {
+		prefix := h.getIssuePrefix(r.Context(), issue.WorkspaceID)
+		resp := issueToResponse(issue, prefix)
+		wsID := util.UUIDToString(ws.ID)
+		h.publish(protocol.EventIssueCreated, wsID, "system", "", map[string]any{"issue": resp})
+
+		if issue.AssigneeType.Valid && issue.AssigneeID.Valid {
+			if _, err := h.TaskService.EnqueueTaskForIssue(r.Context(), issue); err != nil {
+				slog.Warn("github webhook: task enqueue failed", "error", err, "issue_id", util.UUIDToString(issue.ID))
+			}
+		}
+
+		slog.Info("github webhook: created mirror issue",
+			"identifier", identifier,
+			"issue_id", util.UUIDToString(issue.ID),
+		)
+	}
 }
 
 func verifyGitHubSignature(body []byte, signature, secret string) bool {

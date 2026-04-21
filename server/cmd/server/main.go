@@ -80,7 +80,9 @@ func main() {
 	autopilotCtx, autopilotCancel := context.WithCancel(context.Background())
 	taskSvc := service.NewTaskService(queries, hub, bus)
 	autopilotSvc := service.NewAutopilotService(queries, pool, bus, taskSvc)
+	integrationSvc := service.NewIntegrationService(queries, pool, bus, taskSvc)
 	registerAutopilotListeners(bus, autopilotSvc)
+	registerIntegrationListeners(bus, integrationSvc)
 
 	// Start background sweeper to mark stale runtimes as offline.
 	go runRuntimeSweeper(sweepCtx, queries, bus)

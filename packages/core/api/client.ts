@@ -64,6 +64,10 @@ import type {
   ListAutopilotsResponse,
   GetAutopilotResponse,
   ListAutopilotRunsResponse,
+  Integration,
+  CreateIntegrationRequest,
+  UpdateIntegrationRequest,
+  ExternalIssueLink,
 } from "../types";
 import { type Logger, noopLogger } from "../logger";
 import { createRequestId } from "../utils";
@@ -895,5 +899,36 @@ export class ApiClient {
 
   async deleteAutopilotTrigger(autopilotId: string, triggerId: string): Promise<void> {
     await this.fetch(`/api/autopilots/${autopilotId}/triggers/${triggerId}`, { method: "DELETE" });
+  }
+
+  // Integrations
+  async listIntegrations(): Promise<Integration[]> {
+    return this.fetch("/api/integrations");
+  }
+
+  async getIntegration(id: string): Promise<Integration> {
+    return this.fetch(`/api/integrations/${id}`);
+  }
+
+  async createIntegration(data: CreateIntegrationRequest): Promise<Integration> {
+    return this.fetch("/api/integrations", {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
+  }
+
+  async updateIntegration(id: string, data: UpdateIntegrationRequest): Promise<Integration> {
+    return this.fetch(`/api/integrations/${id}`, {
+      method: "PUT",
+      body: JSON.stringify(data),
+    });
+  }
+
+  async deleteIntegration(id: string): Promise<void> {
+    await this.fetch(`/api/integrations/${id}`, { method: "DELETE" });
+  }
+
+  async listExternalLinks(integrationId: string): Promise<ExternalIssueLink[]> {
+    return this.fetch(`/api/integrations/${integrationId}/links`);
   }
 }

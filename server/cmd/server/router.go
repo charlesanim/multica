@@ -133,6 +133,10 @@ func NewRouter(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus) chi.Route
 	r.Post("/auth/local-login", h.LocalLogin)
 	r.Post("/auth/logout", h.Logout)
 
+	// Webhook endpoints (public, verified by HMAC signature)
+	r.Post("/{workspaceSlug}/webhooks/github", h.GitHubWebhook)
+	r.Post("/{workspaceSlug}/webhooks/linear", h.LinearWebhook)
+
 	// Daemon API routes (require daemon token or valid user token)
 	r.Route("/api/daemon", func(r chi.Router) {
 		r.Use(middleware.DaemonAuth(queries))
@@ -379,6 +383,18 @@ func NewRouter(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus) chi.Route
 				r.Post("/archive-completed", h.ArchiveCompletedInbox)
 				r.Post("/{id}/read", h.MarkInboxRead)
 				r.Post("/{id}/archive", h.ArchiveInboxItem)
+			})
+
+			// Integrations
+			r.Route("/api/integrations", func(r chi.Router) {
+				r.Get("/", h.ListIntegrations)
+				r.Post("/", h.CreateIntegration)
+				r.Route("/{id}", func(r chi.Router) {
+					r.Get("/", h.GetIntegration)
+					r.Put("/", h.UpdateIntegration)
+					r.Delete("/", h.DeleteIntegration)
+					r.Get("/links", h.ListExternalLinks)
+				})
 			})
 		})
 	})

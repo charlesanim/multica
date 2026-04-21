@@ -52,3 +52,12 @@ export type {
   GetAutopilotResponse,
   ListAutopilotRunsResponse,
 } from "./autopilot";
+export type {
+  Integration,
+  IntegrationProvider,
+  LinearIntegrationConfig,
+  GitHubIntegrationConfig,
+  CreateIntegrationRequest,
+  UpdateIntegrationRequest,
+  ExternalIssueLink,
+} from "./integration";
