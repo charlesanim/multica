@@ -271,7 +271,7 @@ interface SingleAgentLiveCardProps {
 
 function SingleAgentLiveCard({ task, items, issueId, agentName }: SingleAgentLiveCardProps) {
   const [elapsed, setElapsed] = useState("");
-  const [open, setOpen] = useState(false);
+  const [open, setOpen] = useState(true);
   const [autoScroll, setAutoScroll] = useState(true);
   const [cancelling, setCancelling] = useState(false);
   const [transcriptOpen, setTranscriptOpen] = useState(false);

@@ -170,6 +170,20 @@ export function AgentTranscriptDialog({
   const [runtimeInfo, setRuntimeInfo] = useState<AgentRuntime | null>(null);
   const eventRefs = useRef<Map<number, HTMLDivElement>>(new Map());
   const scrollContainerRef = useRef<HTMLDivElement>(null);
+  const [autoScroll, setAutoScroll] = useState(true);
+
+  // Auto-scroll to bottom when new items arrive (live tasks)
+  useEffect(() => {
+    if (autoScroll && isLive && scrollContainerRef.current) {
+      scrollContainerRef.current.scrollTop = scrollContainerRef.current.scrollHeight;
+    }
+  }, [items, autoScroll, isLive]);
+
+  const handleTranscriptScroll = useCallback(() => {
+    if (!scrollContainerRef.current) return;
+    const { scrollTop, scrollHeight, clientHeight } = scrollContainerRef.current;
+    setAutoScroll(scrollHeight - scrollTop - clientHeight < 60);
+  }, []);
 
   // Fetch agent and runtime metadata when dialog opens
   useEffect(() => {
@@ -368,6 +382,7 @@ export function AgentTranscriptDialog({
         {/* ── Event list ─────────────────────────────────────────── */}
         <div
           ref={scrollContainerRef}
+          onScroll={handleTranscriptScroll}
           className="flex-1 overflow-y-auto min-h-0"
         >
           {items.length === 0 ? (
