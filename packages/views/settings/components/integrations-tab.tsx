@@ -138,7 +138,12 @@ function IntegrationCard({
   }
 
   const webhookUrl = webhookSlug
-    ? `${typeof window !== "undefined" ? window.location.origin : ""}/${webhookSlug}/webhooks/${provider}`
+    ? (() => {
+        if (typeof window === "undefined") return "";
+        const { protocol, hostname } = window.location;
+        // Webhooks are served on port 8443 (public Funnel) instead of the main app port
+        return `${protocol}//${hostname}:8443/${webhookSlug}/webhooks/${provider}`;
+      })()
     : "";
 
   return (
