@@ -21,7 +21,7 @@ ORDER BY created_at ASC;
 UPDATE workspace_integration SET
     enabled = COALESCE(sqlc.narg('enabled'), enabled),
     config = COALESCE(sqlc.narg('config'), config),
-    default_agent_id = sqlc.narg('default_agent_id'),
+    default_agent_id = COALESCE(sqlc.narg('default_agent_id'), default_agent_id),
     webhook_secret = COALESCE(sqlc.narg('webhook_secret'), webhook_secret),
     updated_at = now()
 WHERE id = $1

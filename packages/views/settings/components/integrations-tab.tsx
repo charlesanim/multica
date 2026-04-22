@@ -11,14 +11,16 @@ import {
   useUpdateIntegration,
   useDeleteIntegration,
 } from "@multica/core/integrations";
+import { agentListOptions } from "@multica/core/workspace/queries";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { useCurrentWorkspace } from "@multica/core/paths";
-import type { IntegrationProvider, Integration } from "@multica/core/types";
+import type { IntegrationProvider, Integration, Agent } from "@multica/core/types";
 
 export function IntegrationsTab() {
   const wsId = useWorkspaceId();
   const workspace = useCurrentWorkspace();
   const { data: integrations = [], isLoading } = useQuery(integrationListOptions(wsId));
+  const { data: agents = [] } = useQuery(agentListOptions(wsId));
   const createIntegration = useCreateIntegration();
   const updateIntegration = useUpdateIntegration();
   const deleteIntegration = useDeleteIntegration();
@@ -45,6 +47,7 @@ export function IntegrationsTab() {
             description="Import Linear issues when they reach active states (e.g., Todo). Status syncs back when agents complete work."
             integration={linearIntegration}
             webhookSlug={workspace?.slug}
+            agents={agents}
             onCreate={() =>
               createIntegration.mutate({
                 provider: "linear",
@@ -61,6 +64,9 @@ export function IntegrationsTab() {
             onUpdateSecret={(id, webhook_secret) =>
               updateIntegration.mutate({ id, webhook_secret })
             }
+            onUpdateAgent={(id, default_agent_id) =>
+              updateIntegration.mutate({ id, default_agent_id })
+            }
           />
 
           <IntegrationCard
@@ -69,6 +75,7 @@ export function IntegrationsTab() {
             description="Import GitHub issues into Multica. Agents pick them up and close the GitHub issue when done."
             integration={githubIntegration}
             webhookSlug={workspace?.slug}
+            agents={agents}
             onCreate={() =>
               createIntegration.mutate({
                 provider: "github",
@@ -85,6 +92,9 @@ export function IntegrationsTab() {
             onUpdateSecret={(id, webhook_secret) =>
               updateIntegration.mutate({ id, webhook_secret })
             }
+            onUpdateAgent={(id, default_agent_id) =>
+              updateIntegration.mutate({ id, default_agent_id })
+            }
           />
         </>
       )}
@@ -98,11 +108,13 @@ interface IntegrationCardProps {
   description: string;
   integration?: Integration;
   webhookSlug?: string;
+  agents: Agent[];
   onCreate: () => void;
   onToggle: (id: string, enabled: boolean) => void;
   onDelete: (id: string) => void;
   onUpdate: (id: string, config: Record<string, unknown>) => void;
   onUpdateSecret: (id: string, secret: string) => void;
+  onUpdateAgent: (id: string, agentId: string) => void;
 }
 
 function IntegrationCard({
@@ -111,11 +123,13 @@ function IntegrationCard({
   description,
   integration,
   webhookSlug,
+  agents,
   onCreate,
   onToggle,
   onDelete,
   onUpdate,
   onUpdateSecret,
+  onUpdateAgent,
 }: IntegrationCardProps) {
   const [editing, setEditing] = useState(false);
   const [secret, setSecret] = useState("");
@@ -273,6 +287,28 @@ function IntegrationCard({
           </p>
         </div>
       )}
+
+      {/* Default agent selector */}
+      <div className="space-y-1">
+        <label className="text-xs font-medium text-muted-foreground">
+          Default Agent
+        </label>
+        <select
+          className="w-full rounded-md border border-border bg-background px-3 py-1.5 text-sm"
+          value={integration.default_agent_id ?? ""}
+          onChange={(e) => {
+            if (e.target.value) onUpdateAgent(integration.id, e.target.value);
+          }}
+        >
+          <option value="" disabled>Select an agent...</option>
+          {agents.map((a) => (
+            <option key={a.id} value={a.id}>{a.name}</option>
+          ))}
+        </select>
+        <p className="text-xs text-muted-foreground">
+          Imported issues will be assigned to this agent.
+        </p>
+      </div>
 
       {/* Config editing */}
       {editing && (

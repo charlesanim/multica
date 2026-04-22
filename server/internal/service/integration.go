@@ -78,14 +78,23 @@ func (s *IntegrationService) ImportExternalIssue(
 		return db.Issue{}, false, fmt.Errorf("check existing link: %w", err)
 	}
 
-	// Need a default agent to assign to.
-	if !integration.DefaultAgentID.Valid {
-		return db.Issue{}, false, fmt.Errorf("no default agent configured for %s integration", ext.Provider)
+	// Find the agent to assign. Prefer configured default, fall back to first available agent.
+	var agentID pgtype.UUID
+	if integration.DefaultAgentID.Valid {
+		agentID = integration.DefaultAgentID
+	} else {
+		agents, err := s.Queries.ListAgents(ctx, workspaceID)
+		if err != nil || len(agents) == 0 {
+			return db.Issue{}, false, fmt.Errorf("no agents available in workspace for %s integration", ext.Provider)
+		}
+		agentID = pgtype.UUID{Bytes: agents[0].ID.Bytes, Valid: true}
+		slog.Warn("integration: no default agent, using first available",
+			"agent", agents[0].Name, "provider", ext.Provider)
 	}
 
-	agent, err := s.Queries.GetAgent(ctx, integration.DefaultAgentID)
+	agent, err := s.Queries.GetAgent(ctx, agentID)
 	if err != nil {
-		return db.Issue{}, false, fmt.Errorf("load default agent: %w", err)
+		return db.Issue{}, false, fmt.Errorf("load agent: %w", err)
 	}
 
 	// Map external priority to Multica priority.
@@ -117,7 +126,7 @@ func (s *IntegrationService) ImportExternalIssue(
 		Status:        "todo",
 		Priority:      priority,
 		AssigneeType:  pgtype.Text{String: "agent", Valid: true},
-		AssigneeID:    integration.DefaultAgentID,
+		AssigneeID:    agentID,
 		CreatorType:   "agent",
 		CreatorID:     agent.ID,
 		ParentIssueID: pgtype.UUID{},

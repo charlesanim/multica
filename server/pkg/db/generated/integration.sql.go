@@ -347,7 +347,7 @@ const updateWorkspaceIntegration = `-- name: UpdateWorkspaceIntegration :one
 UPDATE workspace_integration SET
     enabled = COALESCE($2, enabled),
     config = COALESCE($3, config),
-    default_agent_id = $4,
+    default_agent_id = COALESCE($4, default_agent_id),
     webhook_secret = COALESCE($5, webhook_secret),
     updated_at = now()
 WHERE id = $1
