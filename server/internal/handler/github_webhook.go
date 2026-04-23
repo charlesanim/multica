@@ -104,9 +104,10 @@ func (h *Handler) handlePRReviewComment(r *http.Request, ws db.Workspace, body [
 		return
 	}
 
-	// Skip comments from bots/agents to avoid loops.
+	// Skip comments from Multica's own agents to avoid loops.
+	// Allow external bots (like copilot[bot]) — those are PR reviewers we want to react to.
 	login := payload.Comment.User.Login
-	if strings.HasSuffix(login, "[bot]") || login == "github-actions" {
+	if login == "github-actions" {
 		return
 	}
 
@@ -141,7 +142,7 @@ func (h *Handler) handlePRReview(r *http.Request, ws db.Workspace, body []byte) 
 	}
 
 	login := payload.Review.User.Login
-	if strings.HasSuffix(login, "[bot]") || login == "github-actions" {
+	if login == "github-actions" {
 		return
 	}
 
@@ -182,7 +183,7 @@ func (h *Handler) handleIssueComment(r *http.Request, ws db.Workspace, body []by
 	}
 
 	login := payload.Comment.User.Login
-	if strings.HasSuffix(login, "[bot]") || login == "github-actions" {
+	if login == "github-actions" {
 		return
 	}
 
@@ -192,7 +193,8 @@ func (h *Handler) handleIssueComment(r *http.Request, ws db.Workspace, body []by
 }
 
 // notifyAgentAboutPR finds the Multica issue linked to a PR (by branch name or PR URL
-// in comments) and posts a notification comment tagging the assigned agent.
+// in comments) and posts a notification comment tagging the assigned agent,
+// then enqueues a task so the agent actually picks up the work.
 func (h *Handler) notifyAgentAboutPR(r *http.Request, ws db.Workspace, prNumber int, branchName, message string) {
 	wsID := uuidToString(ws.ID)
 
@@ -233,14 +235,42 @@ func (h *Handler) notifyAgentAboutPR(r *http.Request, ws db.Workspace, prNumber 
 	content := fmt.Sprintf("GitHub PR #%d feedback:\n\n%s\n\n[@%s](mention://agent/%s) please address this feedback.",
 		prNumber, message, agent.Name, uuidToString(agent.ID))
 
-	h.Queries.CreateComment(r.Context(), db.CreateCommentParams{
+	comment, err := h.Queries.CreateComment(r.Context(), db.CreateCommentParams{
 		IssueID:     issue.ID,
 		WorkspaceID: ws.ID,
 		AuthorType:  "system",
 		Content:     content,
 		Type:        "comment",
 	})
+	if err != nil {
+		slog.Warn("github webhook: failed to create comment", "error", err, "issue", uuidToString(issue.ID))
+		return
+	}
+
 	slog.Info("github webhook: notified agent", "agent", agent.Name, "issue", uuidToString(issue.ID), "pr", prNumber)
+
+	// Publish comment:created event so the UI updates in real-time.
+	h.publish(protocol.EventCommentCreated, wsID, "system", "", map[string]any{
+		"comment": map[string]any{
+			"id":          uuidToString(comment.ID),
+			"issue_id":    uuidToString(issue.ID),
+			"author_type": "system",
+			"author_id":   "",
+			"content":     content,
+			"type":        "comment",
+			"created_at":  util.TimestampToString(comment.CreatedAt),
+			"updated_at":  util.TimestampToString(comment.UpdatedAt),
+		},
+	})
+
+	// Enqueue a task for the agent so it actually starts working on the feedback.
+	if h.TaskService != nil {
+		if _, err := h.TaskService.EnqueueTaskForIssue(r.Context(), issue, comment.ID); err != nil {
+			slog.Warn("github webhook: task enqueue failed", "error", err, "issue", uuidToString(issue.ID), "pr", prNumber)
+		} else {
+			slog.Info("github webhook: task enqueued for PR feedback", "agent", agent.Name, "issue", uuidToString(issue.ID), "pr", prNumber)
+		}
+	}
 }
 
 // handleGitHubIssuesEvent processes GitHub issue events to import issues into Multica.
