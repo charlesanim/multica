@@ -281,9 +281,10 @@ func (h *Handler) notifyAgentAboutPR(r *http.Request, ws db.Workspace, prNumber 
 	comment, err := h.Queries.CreateComment(r.Context(), db.CreateCommentParams{
 		IssueID:     issue.ID,
 		WorkspaceID: ws.ID,
-		AuthorType:  "system",
+		AuthorType:  "agent",
+		AuthorID:    agent.ID,
 		Content:     content,
-		Type:        "comment",
+		Type:        "system",
 	})
 	if err != nil {
 		slog.Warn("github webhook: failed to create comment", "error", err, "issue", uuidToString(issue.ID))
@@ -293,12 +294,12 @@ func (h *Handler) notifyAgentAboutPR(r *http.Request, ws db.Workspace, prNumber 
 	slog.Info("github webhook: notified agent", "agent", agent.Name, "issue", uuidToString(issue.ID), "pr", prNumber)
 
 	// Publish comment:created event so the UI updates in real-time.
-	h.publish(protocol.EventCommentCreated, wsID, "system", "", map[string]any{
+	h.publish(protocol.EventCommentCreated, wsID, "agent", uuidToString(agent.ID), map[string]any{
 		"comment": map[string]any{
 			"id":          uuidToString(comment.ID),
 			"issue_id":    uuidToString(issue.ID),
-			"author_type": "system",
-			"author_id":   "",
+			"author_type": "agent",
+			"author_id":   uuidToString(agent.ID),
 			"content":     content,
 			"type":        "comment",
 			"created_at":  util.TimestampToString(comment.CreatedAt),
