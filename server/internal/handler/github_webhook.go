@@ -13,6 +13,7 @@ import (
 	"strings"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/logger"
 	"github.com/multica-ai/multica/server/internal/service"
 	"github.com/multica-ai/multica/server/internal/util"
@@ -100,12 +101,15 @@ func (h *Handler) handlePRReviewComment(r *http.Request, ws db.Workspace, body [
 			Line    *int   `json:"line"`
 		} `json:"comment"`
 	}
-	if err := json.Unmarshal(body, &payload); err != nil || payload.Action != "created" {
+	if err := json.Unmarshal(body, &payload); err != nil {
+		slog.Warn("github webhook: failed to parse PR review comment payload", "error", err)
+		return
+	}
+	if payload.Action != "created" {
+		slog.Debug("github webhook: skipping PR review comment", "action", payload.Action, "pr", payload.PullRequest.Number)
 		return
 	}
 
-	// Skip comments from Multica's own agents to avoid loops.
-	// Allow external bots (like copilot[bot]) — those are PR reviewers we want to react to.
 	login := payload.Comment.User.Login
 	if login == "github-actions" {
 		return
@@ -116,6 +120,8 @@ func (h *Handler) handlePRReviewComment(r *http.Request, ws db.Workspace, body [
 	commentBody := payload.Comment.Body
 	commentURL := payload.Comment.HTMLURL
 	filePath := payload.Comment.Path
+
+	slog.Info("github webhook: processing PR review comment", "pr", prNumber, "branch", branchName, "user", login, "file", filePath)
 
 	h.notifyAgentAboutPR(r, ws, prNumber, branchName,
 		fmt.Sprintf("New PR review comment from @%s on `%s`:\n> %s\n\n[View on GitHub](%s)",
@@ -137,7 +143,12 @@ func (h *Handler) handlePRReview(r *http.Request, ws db.Workspace, body []byte) 
 			Head   struct{ Ref string } `json:"head"`
 		} `json:"pull_request"`
 	}
-	if err := json.Unmarshal(body, &payload); err != nil || payload.Action != "submitted" {
+	if err := json.Unmarshal(body, &payload); err != nil {
+		slog.Warn("github webhook: failed to parse PR review payload", "error", err)
+		return
+	}
+	if payload.Action != "submitted" {
+		slog.Debug("github webhook: skipping PR review", "action", payload.Action, "pr", payload.PullRequest.Number)
 		return
 	}
 
@@ -146,11 +157,19 @@ func (h *Handler) handlePRReview(r *http.Request, ws db.Workspace, body []byte) 
 		return
 	}
 
-	// Only notify on reviews with substance.
+	// Notify on reviews with substance (changes_requested, commented).
+	// Also allow "approved" with a body — reviewer may have left feedback.
 	state := payload.Review.State
 	if state != "changes_requested" && state != "commented" {
-		return
+		if state == "approved" && payload.Review.Body != "" {
+			// Approved with comments — still worth notifying
+		} else {
+			slog.Debug("github webhook: skipping PR review", "state", state, "pr", payload.PullRequest.Number, "user", login)
+			return
+		}
 	}
+
+	slog.Info("github webhook: processing PR review", "pr", payload.PullRequest.Number, "state", state, "user", login, "branch", payload.PullRequest.Head.Ref)
 
 	h.notifyAgentAboutPR(r, ws, payload.PullRequest.Number, payload.PullRequest.Head.Ref,
 		fmt.Sprintf("PR review from @%s (%s):\n> %s\n\n[View on GitHub](%s)",
@@ -198,36 +217,60 @@ func (h *Handler) handleIssueComment(r *http.Request, ws db.Workspace, body []by
 func (h *Handler) notifyAgentAboutPR(r *http.Request, ws db.Workspace, prNumber int, branchName, message string) {
 	wsID := uuidToString(ws.ID)
 
+	slog.Info("github webhook: looking for linked issue", "pr", prNumber, "branch", branchName, "workspace", wsID)
+
 	// Strategy 1: Search issues for a comment containing the PR URL.
 	prURL := fmt.Sprintf("/pull/%d", prNumber)
 	issues, err := h.Queries.SearchIssuesByCommentContent(r.Context(), db.SearchIssuesByCommentContentParams{
 		WorkspaceID: ws.ID,
 		Content:     "%" + prURL + "%",
 	})
-	if err != nil || len(issues) == 0 {
+	if err != nil {
+		slog.Warn("github webhook: search by PR URL failed", "pr", prNumber, "error", err)
+	}
+	if len(issues) == 0 {
 		// Strategy 2: Search by branch name pattern (agent/<name>/<task-id>).
 		if branchName != "" {
 			issues, err = h.Queries.SearchIssuesByCommentContent(r.Context(), db.SearchIssuesByCommentContentParams{
 				WorkspaceID: ws.ID,
 				Content:     "%" + branchName + "%",
 			})
+			if err != nil {
+				slog.Warn("github webhook: search by branch name failed", "branch", branchName, "error", err)
+			}
 		}
 	}
-	if err != nil || len(issues) == 0 {
-		slog.Debug("github webhook: no linked issue found", "pr", prNumber, "branch", branchName, "workspace", wsID)
+	if len(issues) == 0 {
+		slog.Warn("github webhook: no linked issue found", "pr", prNumber, "branch", branchName, "workspace", wsID, "search_url", prURL)
 		return
 	}
 
 	issue := issues[0]
+	slog.Info("github webhook: found linked issue", "issue", uuidToString(issue.ID), "title", issue.Title, "pr", prNumber)
 
-	// Find the assigned agent.
-	if !issue.AssigneeID.Valid || issue.AssigneeType.String != "agent" {
-		slog.Debug("github webhook: issue not assigned to agent", "issue", uuidToString(issue.ID), "pr", prNumber)
-		return
+	// Find the assigned agent — use issue assignee, or fall back to integration default.
+	var agentID pgtype.UUID
+	if issue.AssigneeID.Valid && issue.AssigneeType.String == "agent" {
+		agentID = issue.AssigneeID
+	} else {
+		// Fall back to default agent from GitHub integration config.
+		integration, err := h.Queries.GetWorkspaceIntegrationByProvider(r.Context(), db.GetWorkspaceIntegrationByProviderParams{
+			WorkspaceID: ws.ID,
+			Provider:    "github",
+		})
+		if err != nil || !integration.DefaultAgentID.Valid {
+			slog.Warn("github webhook: issue not assigned to agent and no default agent",
+				"issue", uuidToString(issue.ID), "pr", prNumber,
+				"assignee_type", issue.AssigneeType.String)
+			return
+		}
+		agentID = integration.DefaultAgentID
+		slog.Info("github webhook: using default agent for unassigned issue", "issue", uuidToString(issue.ID), "pr", prNumber)
 	}
 
-	agent, err := h.Queries.GetAgent(r.Context(), issue.AssigneeID)
+	agent, err := h.Queries.GetAgent(r.Context(), agentID)
 	if err != nil {
+		slog.Warn("github webhook: failed to load agent", "agent_id", uuidToString(agentID), "error", err)
 		return
 	}
 
