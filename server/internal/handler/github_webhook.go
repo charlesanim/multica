@@ -74,6 +74,8 @@ func (h *Handler) GitHubWebhook(w http.ResponseWriter, r *http.Request) {
 		h.handleIssueComment(r, ws, body)
 	case "issues":
 		h.handleGitHubIssuesEvent(r, ws, body)
+	case "pull_request":
+		h.handlePullRequestEvent(r, ws, body)
 	}
 
 	// Always return 200 to acknowledge receipt.
@@ -315,6 +317,93 @@ func (h *Handler) notifyAgentAboutPR(r *http.Request, ws db.Workspace, prNumber 
 			slog.Info("github webhook: task enqueued for PR feedback", "agent", agent.Name, "issue", uuidToString(issue.ID), "pr", prNumber)
 		}
 	}
+}
+
+// handlePullRequestEvent processes pull_request events (opened, closed, merged).
+// When a PR is merged, it finds the linked Multica issue and marks it as done.
+func (h *Handler) handlePullRequestEvent(r *http.Request, ws db.Workspace, body []byte) {
+	var payload struct {
+		Action      string `json:"action"`
+		PullRequest struct {
+			Number  int    `json:"number"`
+			Merged  bool   `json:"merged"`
+			HTMLURL string `json:"html_url"`
+			Head    struct {
+				Ref string `json:"ref"`
+			} `json:"head"`
+			User struct {
+				Login string `json:"login"`
+			} `json:"user"`
+		} `json:"pull_request"`
+	}
+	if err := json.Unmarshal(body, &payload); err != nil {
+		slog.Warn("github webhook: failed to parse pull_request payload", "error", err)
+		return
+	}
+
+	// Only act on closed+merged PRs.
+	if payload.Action != "closed" || !payload.PullRequest.Merged {
+		return
+	}
+
+	prNumber := payload.PullRequest.Number
+	branchName := payload.PullRequest.Head.Ref
+	wsID := uuidToString(ws.ID)
+
+	slog.Info("github webhook: PR merged, looking for linked issue", "pr", prNumber, "branch", branchName)
+
+	// Find linked issue using the same search strategies.
+	prURL := fmt.Sprintf("/pull/%d", prNumber)
+	issues, err := h.Queries.SearchIssuesByCommentContent(r.Context(), db.SearchIssuesByCommentContentParams{
+		WorkspaceID: ws.ID,
+		Content:     "%" + prURL + "%",
+	})
+	if err != nil || len(issues) == 0 {
+		if branchName != "" {
+			issues, err = h.Queries.SearchIssuesByCommentContent(r.Context(), db.SearchIssuesByCommentContentParams{
+				WorkspaceID: ws.ID,
+				Content:     "%" + branchName + "%",
+			})
+		}
+	}
+	if err != nil || len(issues) == 0 {
+		slog.Warn("github webhook: PR merged but no linked issue found", "pr", prNumber, "branch", branchName)
+		return
+	}
+
+	issue := issues[0]
+
+	// Only update if not already in a terminal state.
+	if issue.Status == "done" || issue.Status == "cancelled" {
+		slog.Debug("github webhook: issue already terminal", "issue", uuidToString(issue.ID), "status", issue.Status)
+		return
+	}
+
+	// Mark the issue as done.
+	updated, err := h.Queries.UpdateIssueStatus(r.Context(), db.UpdateIssueStatusParams{
+		ID:     issue.ID,
+		Status: "done",
+	})
+	if err != nil {
+		slog.Warn("github webhook: failed to update issue status", "error", err, "issue", uuidToString(issue.ID))
+		return
+	}
+
+	slog.Info("github webhook: marked issue as done after PR merge",
+		"issue", uuidToString(issue.ID), "title", issue.Title, "pr", prNumber)
+
+	// Cancel any active tasks for this issue.
+	if h.TaskService != nil {
+		h.TaskService.CancelTasksForIssue(r.Context(), issue.ID)
+	}
+
+	// Publish issue:updated event for real-time UI update.
+	prefix := h.getIssuePrefix(r.Context(), issue.WorkspaceID)
+	resp := issueToResponse(updated, prefix)
+	h.publish(protocol.EventIssueUpdated, wsID, "agent", uuidToString(issue.AssigneeID), map[string]any{
+		"issue":   resp,
+		"changes": map[string]any{"status": "done"},
+	})
 }
 
 // handleGitHubIssuesEvent processes GitHub issue events to import issues into Multica.
