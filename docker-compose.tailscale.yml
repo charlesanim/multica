@@ -32,11 +32,34 @@ services:
     volumes:
       - tailscale-state:/var/lib/tailscale
       - ./docker/tailscale-serve.json:/config/serve.json:ro
+      - ./docker/webhook-proxy/enable-funnel.sh:/config/enable-funnel.sh:ro
     devices:
       - /dev/net/tun:/dev/net/tun
     cap_add:
       - net_admin
     restart: unless-stopped
+
+  # Enables Tailscale Funnel for the webhook proxy after Tailscale is online.
+  # Runs once on startup, then exits. Restart policy ensures it re-runs if
+  # the Tailscale container restarts.
+  funnel-init:
+    image: tailscale/tailscale:latest
+    network_mode: service:tailscale
+    volumes:
+      - tailscale-state:/var/lib/tailscale
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        echo "Waiting for Tailscale..."
+        while ! tailscale status >/dev/null 2>&1; do sleep 2; done
+        sleep 3
+        echo "Enabling Funnel on port 8443..."
+        tailscale funnel --bg --https=8443 http://127.0.0.1:4901
+        echo "Funnel enabled."
+    depends_on:
+      - tailscale
+      - webhook-proxy
+    restart: "no"
 
   # Webhook-only reverse proxy. Funneled to the public internet but only
   # accepts /{slug}/webhooks/{provider} paths — everything else is 403.
