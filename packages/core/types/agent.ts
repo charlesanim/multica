@@ -20,7 +20,7 @@ export interface RuntimeDevice {
   status: "online" | "offline";
   device_info: string;
   metadata: Record<string, unknown>;
-  available_models: ModelOption[];
+  available_models?: ModelOption[];
   owner_id: string | null;
   last_seen_at: string | null;
   created_at: string;
