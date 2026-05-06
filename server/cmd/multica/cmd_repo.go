@@ -28,7 +28,10 @@ var repoCheckoutCmd = &cobra.Command{
 	RunE:  runRepoCheckout,
 }
 
+var repoCheckoutRef string
+
 func init() {
+	repoCheckoutCmd.Flags().StringVar(&repoCheckoutRef, "ref", "", "branch, tag, or commit to check out instead of the remote default branch")
 	repoCmd.AddCommand(repoCheckoutCmd)
 }
 
@@ -58,6 +61,7 @@ func runRepoCheckout(cmd *cobra.Command, args []string) error {
 		"url":          repoURL,
 		"workspace_id": workspaceID,
 		"workdir":      workDir,
+		"ref":          repoCheckoutRef,
 		"agent_name":   agentName,
 		"task_id":      taskID,
 	}

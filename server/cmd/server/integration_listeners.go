@@ -43,7 +43,12 @@ func registerIntegrationListeners(bus *events.Bus, integrationSvc *service.Integ
 
 		// Sync in background to avoid blocking the event bus.
 		go func() {
-			dbIssue, err := integrationSvc.Queries.GetIssue(ctx, util.ParseUUID(issue.ID))
+			issueID, err := util.ParseUUID(issue.ID)
+			if err != nil {
+				slog.Debug("integration listener: invalid issue id", "issue_id", issue.ID, "error", err)
+				return
+			}
+			dbIssue, err := integrationSvc.Queries.GetIssue(ctx, issueID)
 			if err != nil {
 				slog.Debug("integration listener: issue not found", "issue_id", issue.ID)
 				return

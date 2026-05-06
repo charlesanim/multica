@@ -5,12 +5,10 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
-	"path/filepath"
-	"sort"
-	"strings"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/multica-ai/multica/server/internal/logger"
+	"github.com/multica-ai/multica/server/internal/migrations"
 )
 
 func main() {
@@ -58,34 +56,14 @@ func main() {
 		os.Exit(1)
 	}
 
-	// Find migration files
-	migrationsDir := "migrations"
-	if _, err := os.Stat(migrationsDir); os.IsNotExist(err) {
-		// Try from server/ directory
-		migrationsDir = "server/migrations"
-	}
-
-	suffix := "." + direction + ".sql"
-	files, err := filepath.Glob(filepath.Join(migrationsDir, "*"+suffix))
+	files, err := migrations.Files(direction)
 	if err != nil {
 		slog.Error("failed to find migration files", "error", err)
 		os.Exit(1)
 	}
 
-	if direction == "up" {
-		sort.Strings(files)
-	} else {
-		sort.Sort(sort.Reverse(sort.StringSlice(files)))
-	}
-
 	for _, file := range files {
-		safeFile, err := validateMigrationPath(migrationsDir, file, suffix)
-		if err != nil {
-			slog.Error("invalid migration file path", "file", file, "error", err)
-			os.Exit(1)
-		}
-
-		version := extractVersion(safeFile)
+		version := migrations.ExtractVersion(file)
 
 		if direction == "up" {
 			// Check if already applied
@@ -113,15 +91,15 @@ func main() {
 			}
 		}
 
-		sql, err := os.ReadFile(safeFile) // #nosec G703 -- safeFile is constrained by validateMigrationPath.
+		sql, err := os.ReadFile(file)
 		if err != nil {
-			slog.Error("failed to read migration file", "file", safeFile, "error", err)
+			slog.Error("failed to read migration file", "file", file, "error", err)
 			os.Exit(1)
 		}
 
 		_, err = pool.Exec(ctx, string(sql))
 		if err != nil {
-			slog.Error("failed to run migration", "file", safeFile, "error", err)
+			slog.Error("failed to run migration", "file", file, "error", err)
 			os.Exit(1)
 		}
 
@@ -139,29 +117,4 @@ func main() {
 	}
 
 	fmt.Println("Done.")
-}
-
-func extractVersion(filename string) string {
-	base := filepath.Base(filename)
-	// Remove .up.sql or .down.sql
-	base = strings.TrimSuffix(base, ".up.sql")
-	base = strings.TrimSuffix(base, ".down.sql")
-	return base
-}
-
-func validateMigrationPath(migrationsDir, file, suffix string) (string, error) {
-	cleanBase := filepath.Clean(migrationsDir)
-	cleanFile := filepath.Clean(file)
-	if !strings.HasSuffix(cleanFile, suffix) {
-		return "", fmt.Errorf("unexpected migration suffix: %s", cleanFile)
-	}
-
-	rel, err := filepath.Rel(cleanBase, cleanFile)
-	if err != nil {
-		return "", fmt.Errorf("relative path check failed: %w", err)
-	}
-	if rel == "." || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
-		return "", fmt.Errorf("migration path escapes base directory: %s", cleanFile)
-	}
-	return cleanFile, nil
 }

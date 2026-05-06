@@ -32,6 +32,9 @@ import { useEditorState } from "@tiptap/react";
 import type { Editor } from "@tiptap/core";
 import { posToDOMRect } from "@tiptap/core";
 import { NodeSelection } from "@tiptap/pm/state";
+import { toast } from "sonner";
+import { useCreateIssue } from "@multica/core/issues/mutations";
+import { modKey } from "@multica/core/platform";
 import { Toggle } from "@multica/ui/components/ui/toggle";
 import { Separator } from "@multica/ui/components/ui/separator";
 import {
@@ -64,6 +67,8 @@ import {
   Heading1,
   Heading2,
   Heading3,
+  FilePlus,
+  Loader2,
 } from "lucide-react";
 
 // ---------------------------------------------------------------------------
@@ -81,10 +86,6 @@ function shouldShowBubbleMenu(editor: Editor): boolean {
   if ($from.parent.type.name === "codeBlock") return false;
   return true;
 }
-
-const isMac =
-  typeof navigator !== "undefined" && /Mac/.test(navigator.platform);
-const mod = isMac ? "\u2318" : "Ctrl";
 
 // ---------------------------------------------------------------------------
 // Mark Toggle Button
@@ -345,10 +346,105 @@ function ListDropdown({ editor, onOpenChange, isBullet, isOrdered }: { editor: E
 }
 
 // ---------------------------------------------------------------------------
+// Create Sub-Issue Button
+// ---------------------------------------------------------------------------
+
+/**
+ * Turns the current selection into a sub-issue of `parentIssueId` and replaces
+ * the selection with a mention link to the new issue. Title is the selected
+ * text (trimmed, collapsed whitespace, capped). Only rendered when a parent
+ * issue is in scope; otherwise there's no meaningful "sub-issue of" target.
+ */
+function CreateSubIssueButton({
+  editor,
+  parentIssueId,
+}: {
+  editor: Editor;
+  parentIssueId: string;
+}) {
+  const createIssue = useCreateIssue();
+  const [pending, setPending] = useState(false);
+
+  const handleClick = useCallback(async () => {
+    if (pending) return;
+    const { from, to } = editor.state.selection;
+    if (from === to) return;
+
+    // Title from selection: collapse whitespace, cap length. The full selection
+    // still becomes the link text — only the issue title is capped.
+    const rawTitle = editor.state.doc.textBetween(from, to, " ", " ").trim();
+    const title = rawTitle.replace(/\s+/g, " ").slice(0, 200);
+    if (!title) return;
+
+    setPending(true);
+    try {
+      const newIssue = await createIssue.mutateAsync({
+        title,
+        parent_issue_id: parentIssueId,
+      });
+      editor
+        .chain()
+        .focus()
+        .insertContentAt(
+          { from, to },
+          [
+            {
+              type: "mention",
+              attrs: {
+                id: newIssue.id,
+                label: newIssue.identifier,
+                type: "issue",
+              },
+            },
+            { type: "text", text: " " },
+          ],
+        )
+        .run();
+      toast.success(`Created ${newIssue.identifier}`);
+    } catch {
+      toast.error("Failed to create sub-issue");
+    } finally {
+      setPending(false);
+    }
+  }, [editor, parentIssueId, createIssue, pending]);
+
+  return (
+    <Tooltip>
+      <TooltipTrigger
+        render={
+          <Toggle
+            size="sm"
+            pressed={false}
+            disabled={pending}
+            onPressedChange={handleClick}
+            onMouseDown={(e) => e.preventDefault()}
+          />
+        }
+      >
+        {pending ? (
+          <Loader2 className="size-3.5 animate-spin" />
+        ) : (
+          <FilePlus className="size-3.5" />
+        )}
+      </TooltipTrigger>
+      <TooltipContent side="top" sideOffset={8}>
+        Create sub-issue from selection
+      </TooltipContent>
+    </Tooltip>
+  );
+}
+
+// ---------------------------------------------------------------------------
 // Main Bubble Menu — @floating-ui/dom + portal to body
 // ---------------------------------------------------------------------------
 
-function EditorBubbleMenu({ editor }: { editor: Editor }) {
+function EditorBubbleMenu({
+  editor,
+  currentIssueId,
+}: {
+  editor: Editor;
+  currentIssueId?: string;
+}) {
   const [visible, setVisible] = useState(false);
   const [mode, setMode] = useState<"toolbar" | "link-edit">("toolbar");
   const floatingRef = useRef<HTMLDivElement>(null);
@@ -478,10 +574,10 @@ function EditorBubbleMenu({ editor }: { editor: Editor }) {
       ) : (
         <TooltipProvider delay={300}>
           <div className="bubble-menu">
-            <MarkButton editor={editor} mark="bold" icon={Bold} label="Bold" shortcut={`${mod}+B`} isActive={fmt.bold} />
-            <MarkButton editor={editor} mark="italic" icon={Italic} label="Italic" shortcut={`${mod}+I`} isActive={fmt.italic} />
-            <MarkButton editor={editor} mark="strike" icon={Strikethrough} label="Strikethrough" shortcut={`${mod}+Shift+S`} isActive={fmt.strike} />
-            <MarkButton editor={editor} mark="code" icon={Code} label="Code" shortcut={`${mod}+E`} isActive={fmt.code} />
+            <MarkButton editor={editor} mark="bold" icon={Bold} label="Bold" shortcut={`${modKey}+B`} isActive={fmt.bold} />
+            <MarkButton editor={editor} mark="italic" icon={Italic} label="Italic" shortcut={`${modKey}+I`} isActive={fmt.italic} />
+            <MarkButton editor={editor} mark="strike" icon={Strikethrough} label="Strikethrough" shortcut={`${modKey}+Shift+S`} isActive={fmt.strike} />
+            <MarkButton editor={editor} mark="code" icon={Code} label="Code" shortcut={`${modKey}+E`} isActive={fmt.code} />
             <Separator orientation="vertical" className="mx-0.5 h-5" />
             <Tooltip>
               <TooltipTrigger render={
@@ -502,6 +598,12 @@ function EditorBubbleMenu({ editor }: { editor: Editor }) {
               </TooltipTrigger>
               <TooltipContent side="top" sideOffset={8}>Quote</TooltipContent>
             </Tooltip>
+            {currentIssueId && (
+              <>
+                <Separator orientation="vertical" className="mx-0.5 h-5" />
+                <CreateSubIssueButton editor={editor} parentIssueId={currentIssueId} />
+              </>
+            )}
           </div>
         </TooltipProvider>
       )}
