@@ -9,6 +9,7 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"net/url"
 	"strconv"
 	"strings"
 
@@ -31,6 +32,18 @@ func (h *Handler) GitHubWebhook(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		writeError(w, http.StatusBadRequest, "failed to read body")
 		return
+	}
+
+	// GitHub can send webhooks as application/x-www-form-urlencoded with a
+	// "payload" field. Extract the JSON from the form if needed.
+	contentType := r.Header.Get("Content-Type")
+	if strings.HasPrefix(contentType, "application/x-www-form-urlencoded") {
+		parsed, err := url.ParseQuery(string(body))
+		if err == nil {
+			if p := parsed.Get("payload"); p != "" {
+				body = []byte(p)
+			}
+		}
 	}
 
 	// Look up workspace by slug.
