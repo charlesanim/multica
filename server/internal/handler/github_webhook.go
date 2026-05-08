@@ -34,18 +34,6 @@ func (h *Handler) GitHubWebhook(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// GitHub can send webhooks as application/x-www-form-urlencoded with a
-	// "payload" field. Extract the JSON from the form if needed.
-	contentType := r.Header.Get("Content-Type")
-	if strings.HasPrefix(contentType, "application/x-www-form-urlencoded") {
-		parsed, err := url.ParseQuery(string(body))
-		if err == nil {
-			if p := parsed.Get("payload"); p != "" {
-				body = []byte(p)
-			}
-		}
-	}
-
 	// Look up workspace by slug.
 	ws, err := h.Queries.GetWorkspaceBySlug(r.Context(), wsSlug)
 	if err != nil {
@@ -53,8 +41,7 @@ func (h *Handler) GitHubWebhook(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Verify HMAC signature using the integration's webhook secret (preferred)
-	// or the workspace-level webhook secret (legacy fallback).
+	// Verify HMAC signature on the RAW body before any transformation.
 	var webhookSecret string
 	integration, intErr := h.Queries.GetWorkspaceIntegrationByProvider(r.Context(), db.GetWorkspaceIntegrationByProviderParams{
 		WorkspaceID: ws.ID,
@@ -71,6 +58,18 @@ func (h *Handler) GitHubWebhook(w http.ResponseWriter, r *http.Request) {
 		if !verifyGitHubSignature(body, sig, webhookSecret) {
 			writeError(w, http.StatusUnauthorized, "invalid signature")
 			return
+		}
+	}
+
+	// GitHub can send webhooks as application/x-www-form-urlencoded with a
+	// "payload" field. Extract the JSON after signature verification.
+	contentType := r.Header.Get("Content-Type")
+	if strings.HasPrefix(contentType, "application/x-www-form-urlencoded") {
+		parsed, parseErr := url.ParseQuery(string(body))
+		if parseErr == nil {
+			if p := parsed.Get("payload"); p != "" {
+				body = []byte(p)
+			}
 		}
 	}
 
