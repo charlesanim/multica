@@ -40,26 +40,35 @@ services:
     restart: unless-stopped
 
   # Enables Tailscale Funnel for the webhook proxy after Tailscale is online.
-  # Runs once on startup, then exits. Restart policy ensures it re-runs if
-  # the Tailscale container restarts.
+  # Runs inside the Tailscale container's network namespace and retries
+  # until the funnel command succeeds. Restarts on failure to handle
+  # cases where Tailscale isn't ready yet.
   funnel-init:
     image: tailscale/tailscale:latest
     network_mode: service:tailscale
     volumes:
       - tailscale-state:/var/lib/tailscale
+    environment:
+      TS_STATE_DIR: /var/lib/tailscale
     entrypoint: ["/bin/sh", "-c"]
     command:
       - |
-        echo "Waiting for Tailscale..."
-        while ! tailscale status >/dev/null 2>&1; do sleep 2; done
-        sleep 3
-        echo "Enabling Funnel on port 8443..."
-        tailscale funnel --bg --https=8443 http://127.0.0.1:4901
-        echo "Funnel enabled."
+        echo "Waiting for Tailscale to be ready..."
+        for i in $(seq 1 30); do
+          if tailscale status >/dev/null 2>&1; then
+            echo "Tailscale is online. Enabling Funnel..."
+            sleep 5
+            tailscale funnel --bg --https=8443 http://127.0.0.1:4901 && echo "Funnel enabled." && exit 0
+            echo "Funnel command failed, retrying..."
+          fi
+          sleep 5
+        done
+        echo "Failed to enable funnel after 30 attempts"
+        exit 1
     depends_on:
       - tailscale
       - webhook-proxy
-    restart: "no"
+    restart: on-failure
 
   # Webhook-only reverse proxy. Funneled to the public internet but only
   # accepts /{slug}/webhooks/{provider} paths — everything else is 403.
