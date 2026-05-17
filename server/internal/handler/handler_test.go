@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/multica-ai/multica/server/internal/analytics"
 	"github.com/multica-ai/multica/server/internal/events"
@@ -196,6 +197,27 @@ func createHandlerTestAgent(t *testing.T, name string, mcpConfig []byte) string 
 	})
 
 	return agentID
+}
+
+// createHandlerTestTaskForAgent seeds a queued agent_task_queue row for the
+// given agent and returns the task UUID. Used by tests that need to set
+// X-Task-ID alongside X-Agent-ID — resolveActor now requires the pair to be
+// present and consistent before granting "agent" actor identity.
+func createHandlerTestTaskForAgent(t *testing.T, agentID string) string {
+	t.Helper()
+
+	var taskID string
+	if err := testPool.QueryRow(context.Background(), `
+		INSERT INTO agent_task_queue (agent_id, runtime_id, status, priority)
+		VALUES ($1, $2, 'queued', 0)
+		RETURNING id
+	`, agentID, handlerTestRuntimeID(t)).Scan(&taskID); err != nil {
+		t.Fatalf("failed to create handler test task: %v", err)
+	}
+	t.Cleanup(func() {
+		testPool.Exec(context.Background(), `DELETE FROM agent_task_queue WHERE id = $1`, taskID)
+	})
+	return taskID
 }
 
 func fetchAgentMcpConfig(t *testing.T, agentID string) []byte {
@@ -615,6 +637,525 @@ func TestCreateSubIssueUsesExplicitProjectOverParentProject(t *testing.T) {
 	}
 	if child.ProjectID == nil || *child.ProjectID != childProjectID {
 		t.Fatalf("CreateIssue child: expected explicit project_id %q, got %v", childProjectID, child.ProjectID)
+	}
+}
+
+func TestCreateIssueRejectsActiveDuplicate(t *testing.T) {
+	ctx := context.Background()
+	suffix := fmt.Sprintf("%d", time.Now().UnixNano())
+	var projectID, parentID, issueID, duplicateID string
+	defer func() {
+		for _, id := range []string{duplicateID, issueID, parentID} {
+			if id != "" {
+				testPool.Exec(ctx, `DELETE FROM issue WHERE id = $1`, id)
+			}
+		}
+		if projectID != "" {
+			testPool.Exec(ctx, `DELETE FROM project WHERE id = $1`, projectID)
+		}
+	}()
+
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO project (workspace_id, title)
+		VALUES ($1, $2)
+		RETURNING id
+	`, testWorkspaceID, "Duplicate guard project "+suffix).Scan(&projectID); err != nil {
+		t.Fatalf("create project fixture: %v", err)
+	}
+
+	w := httptest.NewRecorder()
+	req := newRequest("POST", "/api/issues?workspace_id="+testWorkspaceID, map[string]any{
+		"title": "Duplicate guard parent " + suffix,
+	})
+	testHandler.CreateIssue(w, req)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("CreateIssue parent: expected 201, got %d: %s", w.Code, w.Body.String())
+	}
+	var parent IssueResponse
+	if err := json.NewDecoder(w.Body).Decode(&parent); err != nil {
+		t.Fatalf("decode parent: %v", err)
+	}
+	parentID = parent.ID
+
+	title := "SH-PM-SYNTH-01 Synthesize recommendation-to-shortlist planning outputs " + suffix
+	w = httptest.NewRecorder()
+	req = newRequest("POST", "/api/issues?workspace_id="+testWorkspaceID, map[string]any{
+		"title":           title,
+		"status":          "in_progress",
+		"parent_issue_id": parentID,
+		"project_id":      projectID,
+	})
+	testHandler.CreateIssue(w, req)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("CreateIssue original: expected 201, got %d: %s", w.Code, w.Body.String())
+	}
+	var original IssueResponse
+	if err := json.NewDecoder(w.Body).Decode(&original); err != nil {
+		t.Fatalf("decode original: %v", err)
+	}
+	issueID = original.ID
+
+	w = httptest.NewRecorder()
+	req = newRequest("POST", "/api/issues?workspace_id="+testWorkspaceID, map[string]any{
+		"title":           "  sh-pm-synth-01   synthesize recommendation-to-shortlist planning outputs " + suffix + "  ",
+		"parent_issue_id": parentID,
+		"project_id":      projectID,
+	})
+	testHandler.CreateIssue(w, req)
+	if w.Code != http.StatusConflict {
+		t.Fatalf("CreateIssue duplicate: expected 409, got %d: %s", w.Code, w.Body.String())
+	}
+	var conflict struct {
+		Code  string        `json:"code"`
+		Error string        `json:"error"`
+		Issue IssueResponse `json:"issue"`
+	}
+	if err := json.NewDecoder(w.Body).Decode(&conflict); err != nil {
+		t.Fatalf("decode conflict: %v", err)
+	}
+	if conflict.Code != "active_duplicate_issue" {
+		t.Fatalf("code = %q, want active_duplicate_issue", conflict.Code)
+	}
+	if conflict.Issue.ID != issueID || conflict.Issue.Status != "in_progress" {
+		t.Fatalf("conflict issue = %#v, want original %s in_progress", conflict.Issue, issueID)
+	}
+	if !strings.Contains(conflict.Error, original.Identifier+" "+title) || !strings.Contains(conflict.Error, "allow_duplicate=true") || !strings.Contains(conflict.Error, "--allow-duplicate") {
+		t.Fatalf("unexpected duplicate message: %q", conflict.Error)
+	}
+
+	w = httptest.NewRecorder()
+	req = newRequest("POST", "/api/issues?workspace_id="+testWorkspaceID, map[string]any{
+		"title":           title,
+		"parent_issue_id": parentID,
+		"project_id":      projectID,
+		"allow_duplicate": true,
+	})
+	testHandler.CreateIssue(w, req)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("CreateIssue allow duplicate: expected 201, got %d: %s", w.Code, w.Body.String())
+	}
+	var duplicate IssueResponse
+	if err := json.NewDecoder(w.Body).Decode(&duplicate); err != nil {
+		t.Fatalf("decode duplicate: %v", err)
+	}
+	duplicateID = duplicate.ID
+	if duplicateID == issueID {
+		t.Fatalf("allow duplicate returned original issue id %s", duplicateID)
+	}
+
+	w = httptest.NewRecorder()
+	req = newRequest("POST", "/api/issues?workspace_id="+testWorkspaceID, map[string]any{
+		"title":           title,
+		"parent_issue_id": parentID,
+		"project_id":      projectID,
+	})
+	testHandler.CreateIssue(w, req)
+	if w.Code != http.StatusConflict {
+		t.Fatalf("CreateIssue duplicate after allow-duplicate: expected 409, got %d: %s", w.Code, w.Body.String())
+	}
+	if err := json.NewDecoder(w.Body).Decode(&conflict); err != nil {
+		t.Fatalf("decode second conflict: %v", err)
+	}
+	if conflict.Issue.ID != issueID {
+		t.Fatalf("conflict issue = %s, want oldest active issue %s", conflict.Issue.ID, issueID)
+	}
+}
+
+func TestCreateIssueAllowsDuplicateAfterCancelled(t *testing.T) {
+	ctx := context.Background()
+	title := fmt.Sprintf("Cancelled duplicate guard %d", time.Now().UnixNano())
+	var firstID, secondID string
+	defer func() {
+		for _, id := range []string{secondID, firstID} {
+			if id != "" {
+				testPool.Exec(ctx, `DELETE FROM issue WHERE id = $1`, id)
+			}
+		}
+	}()
+
+	w := httptest.NewRecorder()
+	req := newRequest("POST", "/api/issues?workspace_id="+testWorkspaceID, map[string]any{
+		"title":  title,
+		"status": "cancelled",
+	})
+	testHandler.CreateIssue(w, req)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("CreateIssue cancelled: expected 201, got %d: %s", w.Code, w.Body.String())
+	}
+	var first IssueResponse
+	if err := json.NewDecoder(w.Body).Decode(&first); err != nil {
+		t.Fatalf("decode cancelled: %v", err)
+	}
+	firstID = first.ID
+
+	w = httptest.NewRecorder()
+	req = newRequest("POST", "/api/issues?workspace_id="+testWorkspaceID, map[string]any{
+		"title": title,
+	})
+	testHandler.CreateIssue(w, req)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("CreateIssue after cancelled: expected 201, got %d: %s", w.Code, w.Body.String())
+	}
+	var second IssueResponse
+	if err := json.NewDecoder(w.Body).Decode(&second); err != nil {
+		t.Fatalf("decode second: %v", err)
+	}
+	secondID = second.ID
+	if secondID == firstID {
+		t.Fatalf("new issue reused cancelled issue id %s", secondID)
+	}
+}
+
+func TestCreateIssueAllowsDuplicateAfterDone(t *testing.T) {
+	ctx := context.Background()
+	title := fmt.Sprintf("Done duplicate guard %d", time.Now().UnixNano())
+	var firstID, secondID string
+	defer func() {
+		for _, id := range []string{secondID, firstID} {
+			if id != "" {
+				testPool.Exec(ctx, `DELETE FROM issue WHERE id = $1`, id)
+			}
+		}
+	}()
+
+	w := httptest.NewRecorder()
+	req := newRequest("POST", "/api/issues?workspace_id="+testWorkspaceID, map[string]any{
+		"title":  title,
+		"status": "done",
+	})
+	testHandler.CreateIssue(w, req)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("CreateIssue done: expected 201, got %d: %s", w.Code, w.Body.String())
+	}
+	var first IssueResponse
+	if err := json.NewDecoder(w.Body).Decode(&first); err != nil {
+		t.Fatalf("decode done: %v", err)
+	}
+	firstID = first.ID
+
+	w = httptest.NewRecorder()
+	req = newRequest("POST", "/api/issues?workspace_id="+testWorkspaceID, map[string]any{
+		"title": title,
+	})
+	testHandler.CreateIssue(w, req)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("CreateIssue after done: expected 201, got %d: %s", w.Code, w.Body.String())
+	}
+	var second IssueResponse
+	if err := json.NewDecoder(w.Body).Decode(&second); err != nil {
+		t.Fatalf("decode second: %v", err)
+	}
+	secondID = second.ID
+	if secondID == firstID {
+		t.Fatalf("new issue reused done issue id %s", secondID)
+	}
+}
+
+func TestTriggerAutopilotRejectsActiveDuplicateIssue(t *testing.T) {
+	ctx := context.Background()
+	title := fmt.Sprintf("Autopilot duplicate guard %d", time.Now().UnixNano())
+	var issueID, autopilotID string
+	defer func() {
+		if autopilotID != "" {
+			testPool.Exec(ctx, `DELETE FROM autopilot WHERE id = $1`, autopilotID)
+		}
+		if issueID != "" {
+			testPool.Exec(ctx, `DELETE FROM issue WHERE id = $1`, issueID)
+		}
+	}()
+
+	var agentID string
+	if err := testPool.QueryRow(ctx, `SELECT id FROM agent WHERE workspace_id = $1 LIMIT 1`, testWorkspaceID).Scan(&agentID); err != nil {
+		t.Fatalf("load test agent: %v", err)
+	}
+
+	w := httptest.NewRecorder()
+	req := newRequest("POST", "/api/issues?workspace_id="+testWorkspaceID, map[string]any{
+		"title":  title,
+		"status": "todo",
+	})
+	testHandler.CreateIssue(w, req)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("CreateIssue existing: expected 201, got %d: %s", w.Code, w.Body.String())
+	}
+	var existing IssueResponse
+	if err := json.NewDecoder(w.Body).Decode(&existing); err != nil {
+		t.Fatalf("decode existing issue: %v", err)
+	}
+	issueID = existing.ID
+
+	w = httptest.NewRecorder()
+	req = newRequest("POST", "/api/autopilots?workspace_id="+testWorkspaceID, map[string]any{
+		"title":                "Duplicate guard autopilot",
+		"assignee_id":          agentID,
+		"execution_mode":       "create_issue",
+		"issue_title_template": title,
+	})
+	testHandler.CreateAutopilot(w, req)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("CreateAutopilot: expected 201, got %d: %s", w.Code, w.Body.String())
+	}
+	var autopilot AutopilotResponse
+	if err := json.NewDecoder(w.Body).Decode(&autopilot); err != nil {
+		t.Fatalf("decode autopilot: %v", err)
+	}
+	autopilotID = autopilot.ID
+
+	w = httptest.NewRecorder()
+	req = newRequest("POST", "/api/autopilots/"+autopilotID+"/trigger?workspace_id="+testWorkspaceID, nil)
+	req = withURLParam(req, "id", autopilotID)
+	testHandler.TriggerAutopilot(w, req)
+	if w.Code != http.StatusConflict {
+		t.Fatalf("TriggerAutopilot duplicate: expected 409, got %d: %s", w.Code, w.Body.String())
+	}
+	var conflict struct {
+		Code  string `json:"code"`
+		Error string `json:"error"`
+		Issue struct {
+			ID         string `json:"id"`
+			Identifier string `json:"identifier"`
+			Title      string `json:"title"`
+			Status     string `json:"status"`
+		} `json:"issue"`
+	}
+	if err := json.NewDecoder(w.Body).Decode(&conflict); err != nil {
+		t.Fatalf("decode duplicate conflict: %v", err)
+	}
+	if conflict.Code != "active_duplicate_issue" {
+		t.Fatalf("code = %q, want active_duplicate_issue", conflict.Code)
+	}
+	if conflict.Issue.ID != issueID || conflict.Issue.Identifier != existing.Identifier || conflict.Issue.Status != "todo" {
+		t.Fatalf("conflict issue = %#v, want existing %s %s todo", conflict.Issue, issueID, existing.Identifier)
+	}
+	if !strings.Contains(conflict.Error, "Active duplicate issue exists: "+existing.Identifier+" "+title) {
+		t.Fatalf("duplicate error did not mention existing issue: %s", conflict.Error)
+	}
+
+	assertAutopilotDuplicateRunSkipped(t, ctx, autopilotID, issueID, existing.Identifier, title)
+	assertAutopilotNotFailureMonitorCandidate(t, ctx, autopilotID)
+
+	var count int
+	if err := testPool.QueryRow(ctx, `SELECT count(*) FROM issue WHERE workspace_id = $1 AND title = $2`, testWorkspaceID, title).Scan(&count); err != nil {
+		t.Fatalf("count issues: %v", err)
+	}
+	if count != 1 {
+		t.Fatalf("autopilot duplicate guard should leave one matching issue, got %d", count)
+	}
+}
+
+func TestScheduledAutopilotDuplicateIssueSkipsRun(t *testing.T) {
+	ctx := context.Background()
+	title := fmt.Sprintf("Scheduled autopilot duplicate guard %d", time.Now().UnixNano())
+	var issueID, autopilotID string
+	defer func() {
+		if autopilotID != "" {
+			testPool.Exec(ctx, `DELETE FROM autopilot WHERE id = $1`, autopilotID)
+		}
+		if issueID != "" {
+			testPool.Exec(ctx, `DELETE FROM issue WHERE id = $1`, issueID)
+		}
+	}()
+
+	var agentID string
+	if err := testPool.QueryRow(ctx, `SELECT id FROM agent WHERE workspace_id = $1 LIMIT 1`, testWorkspaceID).Scan(&agentID); err != nil {
+		t.Fatalf("load test agent: %v", err)
+	}
+
+	w := httptest.NewRecorder()
+	req := newRequest("POST", "/api/issues?workspace_id="+testWorkspaceID, map[string]any{
+		"title":  title,
+		"status": "todo",
+	})
+	testHandler.CreateIssue(w, req)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("CreateIssue existing: expected 201, got %d: %s", w.Code, w.Body.String())
+	}
+	var existing IssueResponse
+	if err := json.NewDecoder(w.Body).Decode(&existing); err != nil {
+		t.Fatalf("decode existing issue: %v", err)
+	}
+	issueID = existing.ID
+
+	w = httptest.NewRecorder()
+	req = newRequest("POST", "/api/autopilots?workspace_id="+testWorkspaceID, map[string]any{
+		"title":                "Scheduled duplicate guard autopilot",
+		"assignee_id":          agentID,
+		"execution_mode":       "create_issue",
+		"issue_title_template": title,
+	})
+	testHandler.CreateAutopilot(w, req)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("CreateAutopilot: expected 201, got %d: %s", w.Code, w.Body.String())
+	}
+	var autopilot AutopilotResponse
+	if err := json.NewDecoder(w.Body).Decode(&autopilot); err != nil {
+		t.Fatalf("decode autopilot: %v", err)
+	}
+	autopilotID = autopilot.ID
+
+	queries := db.New(testPool)
+	ap, err := queries.GetAutopilot(ctx, parseUUID(autopilotID))
+	if err != nil {
+		t.Fatalf("GetAutopilot: %v", err)
+	}
+	run, err := testHandler.AutopilotService.DispatchAutopilot(ctx, ap, pgtype.UUID{}, "schedule", nil)
+	if err != nil {
+		t.Fatalf("DispatchAutopilot schedule duplicate: %v", err)
+	}
+	if run == nil {
+		t.Fatal("expected skipped run, got nil")
+	}
+	if run.Status != "skipped" {
+		t.Fatalf("run status = %q, want skipped", run.Status)
+	}
+	assertAutopilotDuplicateRunSkipped(t, ctx, autopilotID, issueID, existing.Identifier, title)
+	assertAutopilotNotFailureMonitorCandidate(t, ctx, autopilotID)
+}
+
+// TestAutopilotCreatedIssueCreatorIsAssigneeAgent locks in that an issue spawned
+// by an autopilot reports the assignee agent — not the human who configured the
+// autopilot — as its creator. The matching issue:created event must carry the
+// same actor identity so downstream activity / notification listeners stay in
+// sync with the issue row.
+func TestAutopilotCreatedIssueCreatorIsAssigneeAgent(t *testing.T) {
+	ctx := context.Background()
+	title := fmt.Sprintf("Autopilot creator attribution %d", time.Now().UnixNano())
+	var autopilotID, issueID string
+	defer func() {
+		if issueID != "" {
+			testPool.Exec(ctx, `DELETE FROM issue WHERE id = $1`, issueID)
+		}
+		if autopilotID != "" {
+			testPool.Exec(ctx, `DELETE FROM autopilot WHERE id = $1`, autopilotID)
+		}
+	}()
+
+	var agentID string
+	if err := testPool.QueryRow(ctx, `SELECT id FROM agent WHERE workspace_id = $1 LIMIT 1`, testWorkspaceID).Scan(&agentID); err != nil {
+		t.Fatalf("load test agent: %v", err)
+	}
+
+	w := httptest.NewRecorder()
+	req := newRequest("POST", "/api/autopilots?workspace_id="+testWorkspaceID, map[string]any{
+		"title":                "Creator attribution autopilot",
+		"assignee_id":          agentID,
+		"execution_mode":       "create_issue",
+		"issue_title_template": title,
+	})
+	testHandler.CreateAutopilot(w, req)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("CreateAutopilot: expected 201, got %d: %s", w.Code, w.Body.String())
+	}
+	var autopilot AutopilotResponse
+	if err := json.NewDecoder(w.Body).Decode(&autopilot); err != nil {
+		t.Fatalf("decode autopilot: %v", err)
+	}
+	autopilotID = autopilot.ID
+	if autopilot.CreatedByType != "member" || autopilot.CreatedByID != testUserID {
+		t.Fatalf("autopilot created_by = %s/%s, want member/%s", autopilot.CreatedByType, autopilot.CreatedByID, testUserID)
+	}
+
+	gotEvent := make(chan events.Event, 1)
+	testHandler.Bus.Subscribe(protocol.EventIssueCreated, func(e events.Event) {
+		select {
+		case gotEvent <- e:
+		default:
+		}
+	})
+
+	queries := db.New(testPool)
+	ap, err := queries.GetAutopilot(ctx, parseUUID(autopilotID))
+	if err != nil {
+		t.Fatalf("GetAutopilot: %v", err)
+	}
+	run, err := testHandler.AutopilotService.DispatchAutopilot(ctx, ap, pgtype.UUID{}, "manual", nil)
+	if err != nil {
+		t.Fatalf("DispatchAutopilot: %v", err)
+	}
+	if run == nil || run.Status != "issue_created" {
+		t.Fatalf("dispatch result = %+v, want status issue_created", run)
+	}
+
+	var creatorType, creatorID string
+	if err := testPool.QueryRow(ctx, `
+		SELECT id, creator_type, creator_id
+		FROM issue
+		WHERE workspace_id = $1 AND title = $2
+		ORDER BY created_at DESC
+		LIMIT 1
+	`, testWorkspaceID, title).Scan(&issueID, &creatorType, &creatorID); err != nil {
+		t.Fatalf("load autopilot-created issue: %v", err)
+	}
+	if creatorType != "agent" {
+		t.Fatalf("issue creator_type = %q, want agent", creatorType)
+	}
+	if creatorID != agentID {
+		t.Fatalf("issue creator_id = %q, want assignee agent %q", creatorID, agentID)
+	}
+
+	select {
+	case ev := <-gotEvent:
+		if ev.ActorType != "agent" {
+			t.Fatalf("issue:created ActorType = %q, want agent", ev.ActorType)
+		}
+		if ev.ActorID != agentID {
+			t.Fatalf("issue:created ActorID = %q, want %q", ev.ActorID, agentID)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("did not receive issue:created event")
+	}
+}
+
+func assertAutopilotDuplicateRunSkipped(t *testing.T, ctx context.Context, autopilotID, issueID, identifier, title string) {
+	t.Helper()
+	var status, failureReason string
+	var result []byte
+	if err := testPool.QueryRow(ctx, `
+		SELECT status, failure_reason, result
+		FROM autopilot_run
+		WHERE autopilot_id = $1
+		ORDER BY created_at DESC
+		LIMIT 1
+	`, autopilotID).Scan(&status, &failureReason, &result); err != nil {
+		t.Fatalf("load autopilot run: %v", err)
+	}
+	if status != "skipped" {
+		t.Fatalf("autopilot duplicate run status = %q, want skipped", status)
+	}
+	if !strings.Contains(failureReason, identifier+" "+title) {
+		t.Fatalf("duplicate run failure_reason = %q, want existing issue details", failureReason)
+	}
+	var payload struct {
+		Code  string `json:"code"`
+		Issue struct {
+			ID         string `json:"id"`
+			Identifier string `json:"identifier"`
+			Title      string `json:"title"`
+			Status     string `json:"status"`
+		} `json:"issue"`
+	}
+	if err := json.Unmarshal(result, &payload); err != nil {
+		t.Fatalf("decode duplicate run result: %v", err)
+	}
+	if payload.Code != "active_duplicate_issue" || payload.Issue.ID != issueID || payload.Issue.Identifier != identifier || payload.Issue.Title != title {
+		t.Fatalf("duplicate run result = %#v, want issue %s %s %q", payload, issueID, identifier, title)
+	}
+}
+
+func assertAutopilotNotFailureMonitorCandidate(t *testing.T, ctx context.Context, autopilotID string) {
+	t.Helper()
+	candidates, err := db.New(testPool).SelectAutopilotsExceedingFailureThreshold(ctx, db.SelectAutopilotsExceedingFailureThresholdParams{
+		MinRuns:            1,
+		FailRatioThreshold: 1,
+		Since:              pgtype.Timestamptz{Time: time.Now().Add(-time.Hour), Valid: true},
+	})
+	if err != nil {
+		t.Fatalf("SelectAutopilotsExceedingFailureThreshold: %v", err)
+	}
+	for _, candidate := range candidates {
+		if uuidToString(candidate.ID) == autopilotID {
+			t.Fatalf("duplicate skipped run should not be a failure monitor candidate: %+v", candidate)
+		}
 	}
 }
 
@@ -1874,14 +2415,18 @@ func TestResolveActor(t *testing.T) {
 			wantActorType: "member",
 		},
 		{
-			name:          "valid agent ID returns agent",
+			// X-Agent-ID without X-Task-ID is not trusted — otherwise a
+			// workspace member who guesses an agent's UUID could impersonate
+			// it and bypass the private-agent gate. See resolveActor for the
+			// rationale.
+			name:          "agent ID without task ID returns member",
 			agentIDHeader: agentID,
-			wantActorType: "agent",
-			wantIsAgent:   true,
+			wantActorType: "member",
 		},
 		{
-			name:          "non-existent agent ID returns member",
+			name:          "non-existent agent ID with task returns member",
 			agentIDHeader: "00000000-0000-0000-0000-000000000099",
+			taskIDHeader:  taskID,
 			wantActorType: "member",
 		},
 		{
@@ -2145,10 +2690,13 @@ func TestAgentReplyDoesNotInheritParentMentions(t *testing.T) {
 
 	// 3. Agent A posts a reply in the same thread with NO mentions.
 	// With the fix, this must NOT inherit the parent mention of Agent B.
+	// resolveActor requires X-Task-ID paired with X-Agent-ID to trust the
+	// agent identity, so we seed a task that belongs to agent A.
+	agentATask := createHandlerTestTaskForAgent(t, agentA)
 	w = postComment(issueID, map[string]any{
 		"content":   "No reply needed — just an acknowledgment.",
 		"parent_id": parentComment.ID,
-	}, map[string]string{"X-Agent-ID": agentA})
+	}, map[string]string{"X-Agent-ID": agentA, "X-Task-ID": agentATask})
 	if w.Code != http.StatusCreated {
 		t.Fatalf("agent A reply: expected 201, got %d: %s", w.Code, w.Body.String())
 	}
@@ -2221,12 +2769,16 @@ func TestMemberReplyToAgentRootDoesNotInheritParentMentions(t *testing.T) {
 
 	// 1. Agent J posts a PR-completion comment that @mentions Reviewer for review.
 	// This is a deliberate handoff and must enqueue a task for Reviewer.
+	// X-Task-ID is required alongside X-Agent-ID for resolveActor to grant
+	// the "agent" actor identity (defense against header forgery).
+	jAgentTask := createHandlerTestTaskForAgent(t, jAgent)
 	w = httptest.NewRecorder()
 	r := newRequest("POST", "/api/issues/"+issueID+"/comments", map[string]any{
 		"content": fmt.Sprintf("PR ready. [@Reviewer](mention://agent/%s) please review this.", reviewerAgent),
 	})
 	r = withURLParam(r, "id", issueID)
 	r.Header.Set("X-Agent-ID", jAgent)
+	r.Header.Set("X-Task-ID", jAgentTask)
 	testHandler.CreateComment(w, r)
 	if w.Code != http.StatusCreated {
 		t.Fatalf("J PR completion: expected 201, got %d: %s", w.Code, w.Body.String())
@@ -2312,7 +2864,10 @@ func TestAgentExplicitMentionStillTriggers(t *testing.T) {
 
 	// Agent A posts a top-level comment that explicitly @mentions Agent B —
 	// a deliberate handoff. This must enqueue a task for Agent B, and must
-	// not enqueue a self-trigger for Agent A.
+	// not enqueue a self-trigger for Agent A. resolveActor requires
+	// X-Task-ID to grant "agent" identity; without it the self-trigger
+	// suppression (authorType=="agent") would not fire.
+	agentATask := createHandlerTestTaskForAgent(t, agentA)
 	explicitMention := fmt.Sprintf("[@Agent B](mention://agent/%s) please take it from here", agentB)
 	w = httptest.NewRecorder()
 	r := newRequest("POST", "/api/issues/"+issueID+"/comments", map[string]any{
@@ -2320,6 +2875,7 @@ func TestAgentExplicitMentionStillTriggers(t *testing.T) {
 	})
 	r = withURLParam(r, "id", issueID)
 	r.Header.Set("X-Agent-ID", agentA)
+	r.Header.Set("X-Task-ID", agentATask)
 	testHandler.CreateComment(w, r)
 	if w.Code != http.StatusCreated {
 		t.Fatalf("agent A handoff: expected 201, got %d: %s", w.Code, w.Body.String())

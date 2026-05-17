@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -11,7 +12,12 @@ import (
 	"time"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
+	"github.com/multica-ai/multica/server/internal/daemonws"
 	"github.com/multica-ai/multica/server/internal/middleware"
+	db "github.com/multica-ai/multica/server/pkg/db/generated"
+	"github.com/multica-ai/multica/server/pkg/protocol"
 )
 
 // slowProbeLocalSkillListStore wraps a LocalSkillListStore but blocks inside
@@ -182,6 +188,63 @@ func TestDaemonHeartbeat_WithDaemonToken_CrossWorkspace(t *testing.T) {
 	}
 }
 
+// TestHandleDaemonWSHeartbeat_RuntimeGoneReturnsAckNotError pins the fix for
+// issue #2391: when GetAgentRuntime returns pgx.ErrNoRows (runtime row was
+// deleted server-side), the WS handler must return a successful ack with
+// RuntimeGone=true rather than an error. Returning an error makes the WS hub
+// log every beat at Warn — the flood the issue is about.
+func TestHandleDaemonWSHeartbeat_RuntimeGoneReturnsAckNotError(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+
+	// A well-formed UUID that does NOT exist in agent_runtime. The handler
+	// must turn the resulting pgx.ErrNoRows into a RuntimeGone ack.
+	missingRuntime := uuid.New().String()
+	ack, err := testHandler.HandleDaemonWSHeartbeat(context.Background(),
+		daemonws.ClientIdentity{WorkspaceID: testWorkspaceID},
+		missingRuntime)
+	if err != nil {
+		t.Fatalf("HandleDaemonWSHeartbeat: unexpected error %v", err)
+	}
+	if ack == nil {
+		t.Fatal("HandleDaemonWSHeartbeat: nil ack for missing runtime")
+	}
+	if !ack.RuntimeGone {
+		t.Fatalf("ack.RuntimeGone = false, want true")
+	}
+	if ack.Status != protocol.HeartbeatStatusRuntimeGone {
+		t.Fatalf("ack.Status = %q, want %q", ack.Status, protocol.HeartbeatStatusRuntimeGone)
+	}
+	if ack.RuntimeID != missingRuntime {
+		t.Fatalf("ack.RuntimeID = %q, want %q", ack.RuntimeID, missingRuntime)
+	}
+}
+
+// TestDaemonHeartbeat_HTTPRuntimeGoneReturns404 pins the HTTP-path mirror:
+// pgx.ErrNoRows on the runtime lookup is the only DB error mapped to 404.
+// Anything else (transient pool issue, schema mismatch, ...) must surface
+// as 500 so the daemon does not mistake a hiccup for a deletion.
+func TestDaemonHeartbeat_HTTPRuntimeGoneReturns404(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+
+	missingRuntime := uuid.New().String()
+	w := httptest.NewRecorder()
+	req := newDaemonTokenRequest(http.MethodPost, "/api/daemon/heartbeat", map[string]any{
+		"runtime_id": missingRuntime,
+	}, testWorkspaceID, "test-daemon")
+	testHandler.DaemonHeartbeat(w, req)
+
+	if w.Code != http.StatusNotFound {
+		t.Fatalf("expected 404 for missing runtime, got %d: %s", w.Code, w.Body.String())
+	}
+	if !strings.Contains(strings.ToLower(w.Body.String()), "runtime not found") {
+		t.Fatalf("expected 'runtime not found' body, got %s", w.Body.String())
+	}
+}
+
 // TestDaemonHeartbeat_SlowProbeDoesNotWedge pins the invariant that a stalled
 // HasPending probe cannot wedge the heartbeat endpoint past the per-probe
 // timeout. The probe is the only bounded call; PopPending is ack-safe-
@@ -320,6 +383,50 @@ func TestGetTaskStatus_WithDaemonToken_CrossWorkspace(t *testing.T) {
 	testHandler.GetTaskStatus(w, req)
 	if w.Code != http.StatusOK {
 		t.Fatalf("GetTaskStatus with correct workspace token: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+}
+
+// TestGetTaskStatus_TransientDBError_Returns500 verifies that a transient DB
+// error from GetAgentTask is reported as 500 rather than 404. The daemon
+// uses 404+"task not found" as a hard cancel signal; a transient lookup
+// failure must therefore not be smuggled into that body, otherwise a single
+// DB hiccup would kill an in-flight agent.
+func TestGetTaskStatus_TransientDBError_Returns500(t *testing.T) {
+	h := &Handler{}
+	h.Queries = db.New(&mockDB{getUserErr: errors.New("connection reset by peer")})
+
+	w := httptest.NewRecorder()
+	req := newDaemonTokenRequest("GET", "/api/daemon/tasks/00000000-0000-0000-0000-000000000001/status", nil,
+		"00000000-0000-0000-0000-000000000000", "test-daemon")
+	req = withURLParam(req, "taskId", "00000000-0000-0000-0000-000000000001")
+
+	h.GetTaskStatus(w, req)
+	if w.Code != http.StatusInternalServerError {
+		t.Fatalf("transient DB error: expected 500, got %d: %s", w.Code, w.Body.String())
+	}
+	if strings.Contains(w.Body.String(), "task not found") {
+		t.Fatalf("transient DB error must not surface as %q (daemon treats that as a deletion): %s", "task not found", w.Body.String())
+	}
+}
+
+// TestGetTaskStatus_ErrNoRows_Returns404 verifies that an actually-missing
+// task row still returns the 404+"task not found" body the daemon relies on
+// to interrupt the running agent.
+func TestGetTaskStatus_ErrNoRows_Returns404(t *testing.T) {
+	h := &Handler{}
+	h.Queries = db.New(&mockDB{getUserErr: pgx.ErrNoRows})
+
+	w := httptest.NewRecorder()
+	req := newDaemonTokenRequest("GET", "/api/daemon/tasks/00000000-0000-0000-0000-000000000001/status", nil,
+		"00000000-0000-0000-0000-000000000000", "test-daemon")
+	req = withURLParam(req, "taskId", "00000000-0000-0000-0000-000000000001")
+
+	h.GetTaskStatus(w, req)
+	if w.Code != http.StatusNotFound {
+		t.Fatalf("ErrNoRows: expected 404, got %d: %s", w.Code, w.Body.String())
+	}
+	if !strings.Contains(w.Body.String(), "task not found") {
+		t.Fatalf("ErrNoRows: expected body to contain %q, got %s", "task not found", w.Body.String())
 	}
 }
 
@@ -1797,6 +1904,140 @@ func TestCompleteTask_CommentTriggered_SkipsSynthesisWhenAgentAlreadyCommented(t
 	}
 }
 
+func TestCompleteTask_CommentTriggered_SuppressesTrivialDoneOutput(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+
+	ctx := context.Background()
+
+	var agentID, runtimeID string
+	if err := testPool.QueryRow(ctx, `
+		SELECT a.id, a.runtime_id FROM agent a WHERE a.workspace_id = $1 LIMIT 1
+	`, testWorkspaceID).Scan(&agentID, &runtimeID); err != nil {
+		t.Fatalf("setup: get agent: %v", err)
+	}
+
+	var issueID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO issue (workspace_id, title, status, priority, creator_id, creator_type, number, position)
+		VALUES ($1, 'trivial-done-suppression fixture', 'in_progress', 'none', $2, 'member', 81200, 0)
+		RETURNING id
+	`, testWorkspaceID, testUserID).Scan(&issueID); err != nil {
+		t.Fatalf("setup: create issue: %v", err)
+	}
+	t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM issue WHERE id = $1`, issueID) })
+
+	var triggerCommentID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO comment (issue_id, workspace_id, author_type, author_id, content, type)
+		VALUES ($1, $2, 'member', $3, 'please follow up', 'comment')
+		RETURNING id
+	`, issueID, testWorkspaceID, testUserID).Scan(&triggerCommentID); err != nil {
+		t.Fatalf("setup: create trigger comment: %v", err)
+	}
+
+	var taskID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO agent_task_queue (
+			agent_id, runtime_id, issue_id, trigger_comment_id,
+			status, priority, started_at
+		)
+		VALUES ($1, $2, $3, $4, 'running', 0, now())
+		RETURNING id
+	`, agentID, runtimeID, issueID, triggerCommentID).Scan(&taskID); err != nil {
+		t.Fatalf("setup: create comment-triggered task: %v", err)
+	}
+	t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM agent_task_queue WHERE id = $1`, taskID) })
+
+	w := httptest.NewRecorder()
+	req := newDaemonTokenRequest("POST", "/api/daemon/tasks/"+taskID+"/complete",
+		map[string]any{"output": "Done."},
+		testWorkspaceID, "legit-daemon")
+	rctx := chi.NewRouteContext()
+	rctx.URLParams.Add("taskId", taskID)
+	req = req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, rctx))
+
+	testHandler.CompleteTask(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("CompleteTask: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var count int
+	if err := testPool.QueryRow(ctx, `
+		SELECT count(*) FROM comment
+		WHERE issue_id = $1 AND author_type = 'agent' AND author_id = $2
+	`, issueID, agentID).Scan(&count); err != nil {
+		t.Fatalf("count agent comments: %v", err)
+	}
+	if count != 0 {
+		t.Fatalf("expected no synthesized agent comment for trivial Done output, got %d", count)
+	}
+}
+
+func TestCompleteTask_AssignmentTriggered_DoesNotSuppressTrivialDoneOutput(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+
+	ctx := context.Background()
+
+	var agentID, runtimeID string
+	if err := testPool.QueryRow(ctx, `
+		SELECT a.id, a.runtime_id FROM agent a WHERE a.workspace_id = $1 LIMIT 1
+	`, testWorkspaceID).Scan(&agentID, &runtimeID); err != nil {
+		t.Fatalf("setup: get agent: %v", err)
+	}
+
+	var issueID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO issue (workspace_id, title, status, priority, creator_id, creator_type, number, position)
+		VALUES ($1, 'assignment-trivial-done fixture', 'in_progress', 'none', $2, 'member', 81201, 0)
+		RETURNING id
+	`, testWorkspaceID, testUserID).Scan(&issueID); err != nil {
+		t.Fatalf("setup: create issue: %v", err)
+	}
+	t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM issue WHERE id = $1`, issueID) })
+
+	var taskID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO agent_task_queue (
+			agent_id, runtime_id, issue_id,
+			status, priority, started_at
+		)
+		VALUES ($1, $2, $3, 'running', 0, now())
+		RETURNING id
+	`, agentID, runtimeID, issueID).Scan(&taskID); err != nil {
+		t.Fatalf("setup: create assignment-triggered task: %v", err)
+	}
+	t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM agent_task_queue WHERE id = $1`, taskID) })
+
+	w := httptest.NewRecorder()
+	req := newDaemonTokenRequest("POST", "/api/daemon/tasks/"+taskID+"/complete",
+		map[string]any{"output": "Done."},
+		testWorkspaceID, "legit-daemon")
+	rctx := chi.NewRouteContext()
+	rctx.URLParams.Add("taskId", taskID)
+	req = req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, rctx))
+
+	testHandler.CompleteTask(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("CompleteTask: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var content string
+	if err := testPool.QueryRow(ctx, `
+		SELECT content FROM comment
+		WHERE issue_id = $1 AND author_type = 'agent' AND author_id = $2
+		ORDER BY created_at DESC LIMIT 1
+	`, issueID, agentID).Scan(&content); err != nil {
+		t.Fatalf("query synthesized comment: %v", err)
+	}
+	if content != "Done." {
+		t.Fatalf("synthesized comment content = %q, want Done.", content)
+	}
+}
+
 type claimRuntimeGuardTask struct {
 	PriorSessionID string `json:"prior_session_id"`
 	PriorWorkDir   string `json:"prior_work_dir"`
@@ -2092,6 +2333,96 @@ func TestClaimTask_IssuePriorSessionRuntimeGuard(t *testing.T) {
 	if task.PriorWorkDir != "/tmp/same-runtime-workdir" {
 		t.Fatalf("runtime match: expected PriorWorkDir='/tmp/same-runtime-workdir', got %q", task.PriorWorkDir)
 	}
+
+	var commentIssueID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO issue (workspace_id, title, status, priority, creator_id, creator_type, number, position)
+		VALUES ($1, 'comment-triggered-session-skip fixture', 'in_progress', 'none', $2, 'member', 81205, 0)
+		RETURNING id
+	`, testWorkspaceID, testUserID).Scan(&commentIssueID); err != nil {
+		t.Fatalf("setup: create comment-triggered issue: %v", err)
+	}
+	t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM issue WHERE id = $1`, commentIssueID) })
+
+	var triggerCommentID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO comment (issue_id, workspace_id, author_type, author_id, content, type)
+		VALUES ($1, $2, 'member', $3, 'please follow up', 'comment')
+		RETURNING id
+	`, commentIssueID, testWorkspaceID, testUserID).Scan(&triggerCommentID); err != nil {
+		t.Fatalf("setup: create trigger comment: %v", err)
+	}
+	if _, err := testPool.Exec(ctx, `
+		INSERT INTO agent_task_queue (
+			agent_id, runtime_id, issue_id,
+			status, priority, started_at, completed_at,
+			session_id, work_dir
+		)
+		VALUES ($1, $2, $3, 'completed', 0, now(), now(), 'comment-prior-session', '/tmp/comment-prior-workdir')
+	`, agentID, runtimeID, commentIssueID); err != nil {
+		t.Fatalf("setup: create comment-trigger prior task: %v", err)
+	}
+	if _, err := testPool.Exec(ctx, `
+		INSERT INTO agent_task_queue (
+			agent_id, runtime_id, issue_id, trigger_comment_id,
+			status, priority
+		)
+		VALUES ($1, $2, $3, $4, 'queued', 0)
+	`, agentID, runtimeID, commentIssueID, triggerCommentID); err != nil {
+		t.Fatalf("setup: create comment-triggered task: %v", err)
+	}
+
+	task = claimTaskForRuntimeGuard(t, runtimeID, daemonID)
+	if task.PriorSessionID != "" {
+		t.Fatalf("comment trigger: expected empty PriorSessionID, got %q", task.PriorSessionID)
+	}
+	if task.PriorWorkDir != "/tmp/comment-prior-workdir" {
+		t.Fatalf("comment trigger: expected PriorWorkDir='/tmp/comment-prior-workdir', got %q", task.PriorWorkDir)
+	}
+	if _, err := testPool.Exec(ctx, `
+		UPDATE agent_task_queue
+		SET status = 'completed', completed_at = now()
+		WHERE issue_id = $1 AND status IN ('dispatched', 'running')
+	`, commentIssueID); err != nil {
+		t.Fatalf("setup: complete claimed comment-trigger task: %v", err)
+	}
+
+	var freshIssueID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO issue (workspace_id, title, status, priority, creator_id, creator_type, number, position)
+		VALUES ($1, 'force-fresh-session fixture', 'in_progress', 'none', $2, 'member', 81206, 0)
+		RETURNING id
+	`, testWorkspaceID, testUserID).Scan(&freshIssueID); err != nil {
+		t.Fatalf("setup: create force-fresh issue: %v", err)
+	}
+	t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM issue WHERE id = $1`, freshIssueID) })
+	if _, err := testPool.Exec(ctx, `
+		INSERT INTO agent_task_queue (
+			agent_id, runtime_id, issue_id,
+			status, priority, started_at, completed_at,
+			session_id, work_dir
+		)
+		VALUES ($1, $2, $3, 'completed', 0, now(), now(), 'force-fresh-prior-session', '/tmp/force-fresh-prior-workdir')
+	`, agentID, runtimeID, freshIssueID); err != nil {
+		t.Fatalf("setup: create force-fresh prior task: %v", err)
+	}
+	if _, err := testPool.Exec(ctx, `
+		INSERT INTO agent_task_queue (
+			agent_id, runtime_id, issue_id,
+			status, priority, force_fresh_session
+		)
+		VALUES ($1, $2, $3, 'queued', 0, TRUE)
+	`, agentID, runtimeID, freshIssueID); err != nil {
+		t.Fatalf("setup: create force-fresh task: %v", err)
+	}
+
+	task = claimTaskForRuntimeGuard(t, runtimeID, daemonID)
+	if task.PriorSessionID != "" {
+		t.Fatalf("force fresh: expected empty PriorSessionID, got %q", task.PriorSessionID)
+	}
+	if task.PriorWorkDir != "" {
+		t.Fatalf("force fresh: expected empty PriorWorkDir, got %q", task.PriorWorkDir)
+	}
 }
 
 func TestClaimTask_ChatPriorSessionRuntimeGuard(t *testing.T) {
@@ -2236,5 +2567,219 @@ func TestClaimTask_ChatLegacyNullRuntimeFallsBackToTaskRow(t *testing.T) {
 	}
 	if task.PriorWorkDir != "/tmp/legacy-fallback-workdir" {
 		t.Fatalf("legacy fallback: expected PriorWorkDir='/tmp/legacy-fallback-workdir', got %q", task.PriorWorkDir)
+	}
+}
+
+// TestGetChatSessionGCCheck verifies the chat session gc-check endpoint
+// matches the same anti-enumeration shape as GetIssueGCCheck: cross-workspace
+// daemon tokens get 404, same-workspace tokens get the live status.
+func TestGetChatSessionGCCheck(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+
+	ctx := context.Background()
+
+	var agentID string
+	if err := testPool.QueryRow(ctx, `SELECT id FROM agent WHERE workspace_id = $1 LIMIT 1`, testWorkspaceID).Scan(&agentID); err != nil {
+		t.Fatalf("setup: get agent: %v", err)
+	}
+
+	var sessionID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO chat_session (workspace_id, agent_id, creator_id, title, status)
+		VALUES ($1, $2, $3, 'gc-check fixture', 'active')
+		RETURNING id
+	`, testWorkspaceID, agentID, testUserID).Scan(&sessionID); err != nil {
+		t.Fatalf("setup: create chat session: %v", err)
+	}
+	defer testPool.Exec(ctx, `DELETE FROM chat_session WHERE id = $1`, sessionID)
+
+	// Cross-workspace daemon token must 404 with no oracle.
+	w := httptest.NewRecorder()
+	req := newDaemonTokenRequest("GET", "/api/daemon/chat-sessions/"+sessionID+"/gc-check", nil,
+		"00000000-0000-0000-0000-000000000000", "attacker-daemon")
+	req = withURLParam(req, "sessionId", sessionID)
+	testHandler.GetChatSessionGCCheck(w, req)
+	if w.Code != http.StatusNotFound {
+		t.Fatalf("cross-workspace token: expected 404, got %d: %s", w.Code, w.Body.String())
+	}
+
+	// Same-workspace daemon token sees the live row.
+	w = httptest.NewRecorder()
+	req = newDaemonTokenRequest("GET", "/api/daemon/chat-sessions/"+sessionID+"/gc-check", nil,
+		testWorkspaceID, "legit-daemon")
+	req = withURLParam(req, "sessionId", sessionID)
+	testHandler.GetChatSessionGCCheck(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("same-workspace token: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	var resp struct {
+		Status    string `json:"status"`
+		UpdatedAt string `json:"updated_at"`
+	}
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if resp.Status != "active" {
+		t.Fatalf("expected status %q, got %q", "active", resp.Status)
+	}
+	if resp.UpdatedAt == "" {
+		t.Fatal("expected updated_at to be set")
+	}
+
+	// Hard-deleted session: 404 — exactly what the daemon needs to reclaim
+	// the workdir on the next GC pass after a user runs DeleteChatSession.
+	if _, err := testPool.Exec(ctx, `DELETE FROM chat_session WHERE id = $1`, sessionID); err != nil {
+		t.Fatalf("delete chat session: %v", err)
+	}
+	w = httptest.NewRecorder()
+	req = newDaemonTokenRequest("GET", "/api/daemon/chat-sessions/"+sessionID+"/gc-check", nil,
+		testWorkspaceID, "legit-daemon")
+	req = withURLParam(req, "sessionId", sessionID)
+	testHandler.GetChatSessionGCCheck(w, req)
+	if w.Code != http.StatusNotFound {
+		t.Fatalf("hard-deleted session: expected 404, got %d: %s", w.Code, w.Body.String())
+	}
+}
+
+// TestGetAutopilotRunGCCheck verifies the autopilot-run gc-check endpoint:
+// 200 with status+completed_at on success, 404 on cross-workspace probe.
+func TestGetAutopilotRunGCCheck(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+
+	ctx := context.Background()
+
+	var agentID string
+	if err := testPool.QueryRow(ctx, `SELECT id FROM agent WHERE workspace_id = $1 LIMIT 1`, testWorkspaceID).Scan(&agentID); err != nil {
+		t.Fatalf("setup: get agent: %v", err)
+	}
+
+	var autopilotID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO autopilot (
+			workspace_id, title, assignee_id, execution_mode,
+			created_by_type, created_by_id
+		)
+		VALUES ($1, 'gc-check autopilot', $2, 'run_only', 'member', $3)
+		RETURNING id
+	`, testWorkspaceID, agentID, testUserID).Scan(&autopilotID); err != nil {
+		t.Fatalf("setup: create autopilot: %v", err)
+	}
+	defer testPool.Exec(ctx, `DELETE FROM autopilot WHERE id = $1`, autopilotID)
+
+	var runID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO autopilot_run (autopilot_id, source, status, completed_at)
+		VALUES ($1, 'manual', 'completed', NOW() - INTERVAL '6 days')
+		RETURNING id
+	`, autopilotID).Scan(&runID); err != nil {
+		t.Fatalf("setup: create autopilot_run: %v", err)
+	}
+
+	// Cross-workspace probe.
+	w := httptest.NewRecorder()
+	req := newDaemonTokenRequest("GET", "/api/daemon/autopilot-runs/"+runID+"/gc-check", nil,
+		"00000000-0000-0000-0000-000000000000", "attacker-daemon")
+	req = withURLParam(req, "runId", runID)
+	testHandler.GetAutopilotRunGCCheck(w, req)
+	if w.Code != http.StatusNotFound {
+		t.Fatalf("cross-workspace token: expected 404, got %d: %s", w.Code, w.Body.String())
+	}
+
+	// Same-workspace probe.
+	w = httptest.NewRecorder()
+	req = newDaemonTokenRequest("GET", "/api/daemon/autopilot-runs/"+runID+"/gc-check", nil,
+		testWorkspaceID, "legit-daemon")
+	req = withURLParam(req, "runId", runID)
+	testHandler.GetAutopilotRunGCCheck(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("same-workspace token: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	var resp struct {
+		Status      string `json:"status"`
+		CompletedAt string `json:"completed_at"`
+	}
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if resp.Status != "completed" {
+		t.Fatalf("expected status %q, got %q", "completed", resp.Status)
+	}
+	if resp.CompletedAt == "" {
+		t.Fatal("expected completed_at to be set for terminal run")
+	}
+}
+
+// TestGetTaskGCCheck verifies the task gc-check endpoint that quick-create
+// workdirs key on. Same anti-enumeration shape via requireDaemonTaskAccess.
+func TestGetTaskGCCheck(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+
+	ctx := context.Background()
+
+	var agentID, runtimeID string
+	if err := testPool.QueryRow(ctx, `
+		SELECT a.id, a.runtime_id FROM agent a WHERE a.workspace_id = $1 LIMIT 1
+	`, testWorkspaceID).Scan(&agentID, &runtimeID); err != nil {
+		t.Fatalf("setup: get agent: %v", err)
+	}
+
+	// Quick-create-shaped task: no issue_id, no chat_session_id, no run id.
+	// context.type is set so ResolveTaskWorkspaceID can recover workspace.
+	quickContext, _ := json.Marshal(map[string]any{
+		"type":         "quick_create",
+		"prompt":       "fixture",
+		"requester_id": testUserID,
+		"workspace_id": testWorkspaceID,
+	})
+
+	var taskID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO agent_task_queue (
+			agent_id, runtime_id, status, priority, context, completed_at
+		)
+		VALUES ($1, $2, 'completed', 0, $3, NOW())
+		RETURNING id
+	`, agentID, runtimeID, quickContext).Scan(&taskID); err != nil {
+		t.Fatalf("setup: create quick-create task: %v", err)
+	}
+	defer testPool.Exec(ctx, `DELETE FROM agent_task_queue WHERE id = $1`, taskID)
+
+	// Cross-workspace probe.
+	w := httptest.NewRecorder()
+	req := newDaemonTokenRequest("GET", "/api/daemon/tasks/"+taskID+"/gc-check", nil,
+		"00000000-0000-0000-0000-000000000000", "attacker-daemon")
+	req = withURLParam(req, "taskId", taskID)
+	testHandler.GetTaskGCCheck(w, req)
+	if w.Code != http.StatusNotFound {
+		t.Fatalf("cross-workspace token: expected 404, got %d: %s", w.Code, w.Body.String())
+	}
+
+	// Same-workspace probe — terminal task returns its status.
+	w = httptest.NewRecorder()
+	req = newDaemonTokenRequest("GET", "/api/daemon/tasks/"+taskID+"/gc-check", nil,
+		testWorkspaceID, "legit-daemon")
+	req = withURLParam(req, "taskId", taskID)
+	testHandler.GetTaskGCCheck(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("same-workspace token: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	var resp struct {
+		Status      string `json:"status"`
+		CompletedAt string `json:"completed_at"`
+	}
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if resp.Status != "completed" {
+		t.Fatalf("expected status %q, got %q", "completed", resp.Status)
+	}
+	if resp.CompletedAt == "" {
+		t.Fatal("expected completed_at to be set for completed task")
 	}
 }

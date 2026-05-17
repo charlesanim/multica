@@ -2,415 +2,114 @@
 
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { Plus, Trash2, ToggleLeft, ToggleRight } from "lucide-react";
+import { toast } from "sonner";
 import { Button } from "@multica/ui/components/ui/button";
-import { Input } from "@multica/ui/components/ui/input";
-import {
-  integrationListOptions,
-  useCreateIntegration,
-  useUpdateIntegration,
-  useDeleteIntegration,
-} from "@multica/core/integrations";
-import { agentListOptions } from "@multica/core/workspace/queries";
+import { Card, CardContent } from "@multica/ui/components/ui/card";
+import { useAuthStore } from "@multica/core/auth";
 import { useWorkspaceId } from "@multica/core/hooks";
-import { useCurrentWorkspace } from "@multica/core/paths";
-import type { IntegrationProvider, Integration, Agent } from "@multica/core/types";
+import { memberListOptions } from "@multica/core/workspace/queries";
+import { githubInstallationsOptions } from "@multica/core/github/queries";
+import { api } from "@multica/core/api";
+import { useT } from "../../i18n";
+
+// lucide-react v1.x dropped brand marks (including Github). Render an inline
+// SVG of the official GitHub octocat mark so the card is still recognizable.
+function GitHubMark({ className }: { className?: string }) {
+  return (
+    <svg viewBox="0 0 24 24" aria-hidden="true" className={className} fill="currentColor">
+      <path d="M12 .5C5.6.5.5 5.6.5 12c0 5.1 3.3 9.4 7.9 10.9.6.1.8-.2.8-.6v-2.2c-3.2.7-3.9-1.5-3.9-1.5-.5-1.3-1.3-1.7-1.3-1.7-1.1-.7.1-.7.1-.7 1.2.1 1.8 1.2 1.8 1.2 1 1.8 2.7 1.3 3.4 1 .1-.8.4-1.3.8-1.6-2.6-.3-5.3-1.3-5.3-5.7 0-1.3.5-2.3 1.2-3.1-.1-.3-.5-1.5.1-3.1 0 0 1-.3 3.3 1.2.9-.3 1.9-.4 2.9-.4s2 .1 2.9.4c2.3-1.5 3.3-1.2 3.3-1.2.6 1.6.2 2.8.1 3.1.7.8 1.2 1.8 1.2 3.1 0 4.4-2.7 5.4-5.3 5.7.4.4.8 1.1.8 2.2v3.3c0 .3.2.7.8.6 4.6-1.5 7.9-5.8 7.9-10.9C23.5 5.6 18.4.5 12 .5z" />
+    </svg>
+  );
+}
 
 export function IntegrationsTab() {
+  const { t } = useT("settings");
   const wsId = useWorkspaceId();
-  const workspace = useCurrentWorkspace();
-  const { data: integrations = [], isLoading } = useQuery(integrationListOptions(wsId));
-  const { data: agents = [] } = useQuery(agentListOptions(wsId));
-  const createIntegration = useCreateIntegration();
-  const updateIntegration = useUpdateIntegration();
-  const deleteIntegration = useDeleteIntegration();
+  const user = useAuthStore((s) => s.user);
+  const { data: members = [] } = useQuery(memberListOptions(wsId));
+  const [connecting, setConnecting] = useState(false);
 
-  const linearIntegration = integrations.find((i) => i.provider === "linear");
-  const githubIntegration = integrations.find((i) => i.provider === "github");
+  const currentMember = members.find((m) => m.user_id === user?.id) ?? null;
+  const canManage = currentMember?.role === "owner" || currentMember?.role === "admin";
+
+  // Only used to gate the Connect button + show a "not configured" hint;
+  // we no longer render the installation list here — admins manage existing
+  // installations on GitHub directly via the Connect flow.
+  const { data } = useQuery({
+    ...githubInstallationsOptions(wsId),
+    enabled: !!wsId && canManage,
+  });
+  const configured = data?.configured ?? false;
+
+  async function handleConnect() {
+    setConnecting(true);
+    try {
+      const resp = await api.getGitHubConnectURL(wsId);
+      if (!resp.configured || !resp.url) {
+        toast.error(t(($) => $.integrations.toast_not_configured));
+        return;
+      }
+      window.open(resp.url, "_blank", "noopener");
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : t(($) => $.integrations.toast_open_failed));
+    } finally {
+      setConnecting(false);
+    }
+  }
 
   return (
     <div className="space-y-8">
-      <div>
-        <h2 className="text-lg font-semibold">Integrations</h2>
-        <p className="text-sm text-muted-foreground mt-1">
-          Connect external issue trackers to automatically import work items.
-        </p>
-      </div>
+      <section className="space-y-4">
+        <h2 className="text-sm font-semibold">{t(($) => $.integrations.section_title)}</h2>
 
-      {isLoading ? (
-        <div className="text-sm text-muted-foreground">Loading...</div>
-      ) : (
-        <>
-          <IntegrationCard
-            provider="linear"
-            title="Linear"
-            description="Import Linear issues when they reach active states (e.g., Todo). Status syncs back when agents complete work."
-            integration={linearIntegration}
-            webhookSlug={workspace?.slug}
-            agents={agents}
-            onCreate={() =>
-              createIntegration.mutate({
-                provider: "linear",
-                config: { active_states: ["Todo"] },
-              })
-            }
-            onToggle={(id, enabled) =>
-              updateIntegration.mutate({ id, enabled })
-            }
-            onDelete={(id) => deleteIntegration.mutate(id)}
-            onUpdate={(id, config) =>
-              updateIntegration.mutate({ id, config })
-            }
-            onUpdateSecret={(id, webhook_secret) =>
-              updateIntegration.mutate({ id, webhook_secret })
-            }
-            onUpdateAgent={(id, default_agent_id) =>
-              updateIntegration.mutate({ id, default_agent_id })
-            }
-          />
+        <Card>
+          <CardContent className="space-y-4">
+            <div className="flex items-start justify-between gap-4">
+              <div className="flex items-start gap-3">
+                <GitHubMark className="h-6 w-6 mt-0.5 shrink-0" />
+                <div className="space-y-1">
+                  <p className="text-sm font-medium">{t(($) => $.integrations.github_title)}</p>
+                  <p className="text-xs text-muted-foreground">
+                    {t(($) => $.integrations.github_description_prefix)}{" "}
+                    <code className="rounded bg-muted px-1 py-0.5 text-[10px]">
+                      {t(($) => $.integrations.github_identifier_example)}
+                    </code>{" "}
+                    {t(($) => $.integrations.github_description_suffix)}{" "}
+                    <strong>{t(($) => $.integrations.github_description_done)}</strong>.
+                  </p>
+                </div>
+              </div>
+              {canManage && (
+                <Button
+                  size="sm"
+                  onClick={handleConnect}
+                  disabled={connecting || !configured}
+                  title={!configured ? t(($) => $.integrations.connect_disabled_tooltip) : undefined}
+                >
+                  {connecting
+                    ? t(($) => $.integrations.connect_opening)
+                    : t(($) => $.integrations.connect_github)}
+                </Button>
+              )}
+            </div>
 
-          <IntegrationCard
-            provider="github"
-            title="GitHub Issues"
-            description="Import GitHub issues into Multica. Agents pick them up and close the GitHub issue when done."
-            integration={githubIntegration}
-            webhookSlug={workspace?.slug}
-            agents={agents}
-            onCreate={() =>
-              createIntegration.mutate({
-                provider: "github",
-                config: { owner: "", repo: "", labels: [] },
-              })
-            }
-            onToggle={(id, enabled) =>
-              updateIntegration.mutate({ id, enabled })
-            }
-            onDelete={(id) => deleteIntegration.mutate(id)}
-            onUpdate={(id, config) =>
-              updateIntegration.mutate({ id, config })
-            }
-            onUpdateSecret={(id, webhook_secret) =>
-              updateIntegration.mutate({ id, webhook_secret })
-            }
-            onUpdateAgent={(id, default_agent_id) =>
-              updateIntegration.mutate({ id, default_agent_id })
-            }
-          />
-        </>
-      )}
-    </div>
-  );
-}
-
-interface IntegrationCardProps {
-  provider: IntegrationProvider;
-  title: string;
-  description: string;
-  integration?: Integration;
-  webhookSlug?: string;
-  agents: Agent[];
-  onCreate: () => void;
-  onToggle: (id: string, enabled: boolean) => void;
-  onDelete: (id: string) => void;
-  onUpdate: (id: string, config: Record<string, unknown>) => void;
-  onUpdateSecret: (id: string, secret: string) => void;
-  onUpdateAgent: (id: string, agentId: string) => void;
-}
-
-function IntegrationCard({
-  provider,
-  title,
-  description,
-  integration,
-  webhookSlug,
-  agents,
-  onCreate,
-  onToggle,
-  onDelete,
-  onUpdate,
-  onUpdateSecret,
-  onUpdateAgent,
-}: IntegrationCardProps) {
-  const [editing, setEditing] = useState(false);
-  const [secret, setSecret] = useState("");
-
-  if (!integration) {
-    return (
-      <div className="border rounded-lg p-4">
-        <div className="flex items-center justify-between">
-          <div>
-            <h3 className="font-medium">{title}</h3>
-            <p className="text-sm text-muted-foreground mt-1">{description}</p>
-          </div>
-          <Button variant="outline" size="sm" onClick={onCreate}>
-            <Plus className="h-4 w-4 mr-1" />
-            Connect
-          </Button>
-        </div>
-      </div>
-    );
-  }
-
-  const webhookUrl = webhookSlug
-    ? (() => {
-        if (typeof window === "undefined") return "";
-        const { protocol, hostname } = window.location;
-        // Webhooks are served on port 8443 (public Funnel) instead of the main app port
-        return `${protocol}//${hostname}:8443/${webhookSlug}/webhooks/${provider}`;
-      })()
-    : "";
-
-  return (
-    <div className="border rounded-lg p-4 space-y-4">
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-3">
-          <h3 className="font-medium">{title}</h3>
-          <span
-            className={`text-xs px-2 py-0.5 rounded-full ${
-              integration.enabled
-                ? "bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400"
-                : "bg-muted text-muted-foreground"
-            }`}
-          >
-            {integration.enabled ? "Active" : "Paused"}
-          </span>
-        </div>
-        <div className="flex items-center gap-2">
-          <Button
-            variant="ghost"
-            size="sm"
-            onClick={() => onToggle(integration.id, !integration.enabled)}
-            title={integration.enabled ? "Pause" : "Enable"}
-          >
-            {integration.enabled ? (
-              <ToggleRight className="h-4 w-4" />
-            ) : (
-              <ToggleLeft className="h-4 w-4" />
+            {canManage && !configured && (
+              <p className="text-xs text-muted-foreground">
+                {t(($) => $.integrations.not_configured)}{" "}
+                <code className="rounded bg-muted px-1 py-0.5 text-[10px]">GITHUB_APP_SLUG</code>{" "}
+                {t(($) => $.integrations.not_configured_and)}{" "}
+                <code className="rounded bg-muted px-1 py-0.5 text-[10px]">GITHUB_WEBHOOK_SECRET</code>.
+              </p>
             )}
-          </Button>
-          <Button
-            variant="ghost"
-            size="sm"
-            onClick={() => setEditing(!editing)}
-          >
-            {editing ? "Done" : "Configure"}
-          </Button>
-          <Button
-            variant="ghost"
-            size="sm"
-            onClick={() => onDelete(integration.id)}
-            className="text-destructive"
-          >
-            <Trash2 className="h-4 w-4" />
-          </Button>
-        </div>
-      </div>
 
-      {/* Webhook URL */}
-      {webhookUrl && (
-        <div className="space-y-1">
-          <label className="text-xs font-medium text-muted-foreground">
-            Webhook URL
-          </label>
-          <div className="flex items-center gap-2">
-            <code className="flex-1 text-xs bg-muted px-3 py-1.5 rounded overflow-x-auto">
-              {webhookUrl}
-            </code>
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={() => navigator.clipboard.writeText(webhookUrl)}
-            >
-              Copy
-            </Button>
-          </div>
-          <p className="text-xs text-muted-foreground">
-            {provider === "linear"
-              ? "Add this URL in Linear → Settings → API → Webhooks"
-              : "Add this URL in GitHub → Repo Settings → Webhooks"}
-          </p>
-        </div>
-      )}
-
-      {/* Signing secret */}
-      {webhookUrl && provider === "linear" && (
-        <div className="space-y-1">
-          <label className="text-xs font-medium text-muted-foreground">
-            Signing Secret
-          </label>
-          <div className="flex items-center gap-2">
-            <Input
-              className="flex-1 text-xs font-mono"
-              type="password"
-              placeholder="Paste the signing secret from Linear"
-              value={secret}
-              onChange={(e) => setSecret(e.target.value)}
-            />
-            <Button
-              variant="outline"
-              size="sm"
-              disabled={!secret}
-              onClick={() => {
-                onUpdateSecret(integration.id, secret);
-                setSecret("");
-              }}
-            >
-              Save
-            </Button>
-          </div>
-          <p className="text-xs text-muted-foreground">
-            Linear provides this when you create the webhook. Paste it here to verify payloads.
-          </p>
-        </div>
-      )}
-
-      {/* GitHub: show generated secret for user to copy into GitHub */}
-      {webhookUrl && provider === "github" && integration.webhook_secret && (
-        <div className="space-y-1">
-          <label className="text-xs font-medium text-muted-foreground">
-            Webhook Secret
-          </label>
-          <div className="flex items-center gap-2">
-            <code className="flex-1 text-xs bg-muted px-3 py-1.5 rounded font-mono overflow-x-auto">
-              {integration.webhook_secret}
-            </code>
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={() => navigator.clipboard.writeText(integration.webhook_secret!)}
-            >
-              Copy
-            </Button>
-          </div>
-          <p className="text-xs text-muted-foreground">
-            Copy this secret and paste it into GitHub&apos;s webhook &quot;Secret&quot; field.
-          </p>
-        </div>
-      )}
-
-      {/* Default agent selector */}
-      <div className="space-y-1">
-        <label className="text-xs font-medium text-muted-foreground">
-          Default Agent
-        </label>
-        <select
-          className="w-full rounded-md border border-border bg-background px-3 py-1.5 text-sm"
-          value={integration.default_agent_id ?? ""}
-          onChange={(e) => {
-            if (e.target.value) onUpdateAgent(integration.id, e.target.value);
-          }}
-        >
-          <option value="" disabled>Select an agent...</option>
-          {agents.map((a) => (
-            <option key={a.id} value={a.id}>{a.name}</option>
-          ))}
-        </select>
-        <p className="text-xs text-muted-foreground">
-          Imported issues will be assigned to this agent.
-        </p>
-      </div>
-
-      {/* Config editing */}
-      {editing && (
-        <IntegrationConfigEditor
-          provider={provider}
-          config={integration.config as Record<string, unknown>}
-          onSave={(config) => {
-            onUpdate(integration.id, config);
-            setEditing(false);
-          }}
-        />
-      )}
-    </div>
-  );
-}
-
-function IntegrationConfigEditor({
-  provider,
-  config,
-  onSave,
-}: {
-  provider: IntegrationProvider;
-  config: Record<string, unknown>;
-  onSave: (config: Record<string, unknown>) => void;
-}) {
-  const [local, setLocal] = useState(config);
-
-  if (provider === "linear") {
-    return (
-      <div className="space-y-3 border-t pt-4">
-        <div>
-          <label className="text-xs font-medium">Active States</label>
-          <Input
-            className="mt-1"
-            placeholder="Todo, In Progress"
-            value={((local.active_states as string[]) ?? []).join(", ")}
-            onChange={(e) =>
-              setLocal({
-                ...local,
-                active_states: e.target.value
-                  .split(",")
-                  .map((s) => s.trim())
-                  .filter(Boolean),
-              })
-            }
-          />
-          <p className="text-xs text-muted-foreground mt-1">
-            Comma-separated Linear states that trigger import
-          </p>
-        </div>
-        <Button size="sm" onClick={() => onSave(local)}>
-          Save
-        </Button>
-      </div>
-    );
-  }
-
-  return (
-    <div className="space-y-3 border-t pt-4">
-      <div className="grid grid-cols-2 gap-3">
-        <div>
-          <label className="text-xs font-medium">Owner</label>
-          <Input
-            className="mt-1"
-            placeholder="github-org"
-            value={(local.owner as string) ?? ""}
-            onChange={(e) => setLocal({ ...local, owner: e.target.value })}
-          />
-        </div>
-        <div>
-          <label className="text-xs font-medium">Repository</label>
-          <Input
-            className="mt-1"
-            placeholder="my-repo"
-            value={(local.repo as string) ?? ""}
-            onChange={(e) => setLocal({ ...local, repo: e.target.value })}
-          />
-        </div>
-      </div>
-      <div>
-        <label className="text-xs font-medium">Labels filter</label>
-        <Input
-          className="mt-1"
-          placeholder="agent-work, bug (leave empty for all issues)"
-          value={((local.labels as string[]) ?? []).join(", ")}
-          onChange={(e) =>
-            setLocal({
-              ...local,
-              labels: e.target.value
-                .split(",")
-                .map((s) => s.trim())
-                .filter(Boolean),
-            })
-          }
-        />
-        <p className="text-xs text-muted-foreground mt-1">
-          Only import issues with these labels (leave empty for all)
-        </p>
-      </div>
-      <Button size="sm" onClick={() => onSave(local)}>
-        Save
-      </Button>
+            {!canManage && (
+              <p className="text-xs text-muted-foreground">
+                {t(($) => $.integrations.manage_hint)}
+              </p>
+            )}
+          </CardContent>
+        </Card>
+      </section>
     </div>
   );
 }

@@ -2,6 +2,8 @@
 
 import { Suspense, useMemo } from "react";
 import { CoreProvider } from "@multica/core/platform";
+import { createBrowserCookieLocaleAdapter } from "@multica/core/i18n/browser";
+import type { LocaleResources, SupportedLocale } from "@multica/core/i18n";
 import packageJson from "../package.json";
 import { WebNavigationProvider } from "@/platform/navigation";
 import {
@@ -41,7 +43,15 @@ function deriveWsUrl(): string | undefined {
 const WEB_VERSION =
   process.env.NEXT_PUBLIC_APP_VERSION || packageJson.version || "dev";
 
-export function WebProviders({ children }: { children: React.ReactNode }) {
+export function WebProviders({
+  children,
+  locale,
+  resources,
+}: {
+  children: React.ReactNode;
+  locale: SupportedLocale;
+  resources: Record<string, LocaleResources>;
+}) {
   const cookieAuth = !hasLegacyToken();
   const localMode =
     process.env.NEXT_PUBLIC_LOCAL_MODE === "true" ||
@@ -52,6 +62,7 @@ export function WebProviders({ children }: { children: React.ReactNode }) {
     () => ({ platform: "web", version: WEB_VERSION }),
     [],
   );
+  const localeAdapter = useMemo(() => createBrowserCookieLocaleAdapter(), []);
   return (
     <CoreProvider
       apiBaseUrl={process.env.NEXT_PUBLIC_API_URL}
@@ -61,6 +72,9 @@ export function WebProviders({ children }: { children: React.ReactNode }) {
       onLogin={setLoggedInCookie}
       onLogout={clearLoggedInCookie}
       identity={identity}
+      locale={locale}
+      resources={resources}
+      localeAdapter={localeAdapter}
     >
       {/* Suspense boundary is required by Next.js for useSearchParams in
           a client component mounted this high in the tree. */}
